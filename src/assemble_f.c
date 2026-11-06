@@ -8,6 +8,7 @@
 #include <math.h>
 #include <string.h>
 #include "src_dep/Tools.h"
+#include "src_dep/mex_size_guard.h"
 
 #define INVJAC(i,j,k) invjac[i+(j+k*dim)*noe]
 #define GRADREFPHIV(i,j,k) gradrefphiV[i+(j+k*NumQuadPoints)*nlnV]
@@ -2050,6 +2051,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     if (Assembly_name == NULL) {
         mexErrMsgTxt("Could not read assembly name.");
     }
+    mexRequireIntAddressableInputs(nrhs, prhs);
     int recognized = 0;
 
     if (strcmp(Assembly_name, "Stokes")==0)
@@ -2061,6 +2063,23 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         } else if(nlhs!=3) {
             mexErrMsgTxt("Exactly 3 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[5], "pressure local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[6], "velocity degree-of-freedom count");
+        int nln = mexCheckedAddInt(nlnV, nlnP, "combined local node count");
+        (void)mexCheckedMulInt(nln, nln, "combined local matrix size");
+        int dim2 = mexCheckedMulInt(dim, dim, "spatial block size");
+        int vv = mexCheckedMulInt(mexCheckedMulInt(nlnV, nlnV, "velocity block size"),
+                                  dim2, "velocity block size");
+        int vp = mexCheckedMulInt(
+            mexCheckedMulInt(mexCheckedMulInt(2, nlnV, "mixed block size"),
+                             nlnP, "mixed block size"),
+            dim, "mixed block size");
+        int local_size = mexCheckedAddInt(vv, vp, "local Stokes matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled Stokes output size");
 
         AssembleStokes(plhs, prhs);
     }
@@ -2076,6 +2095,15 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             mexErrMsgTxt("Exactly 3 output arguments are required.");
         }
 
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int local_size = mexCheckedMulInt(
+            mexCheckedMulInt(nlnV, nlnV, "local convective matrix size"),
+            dim, "local convective matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled convective output size");
+
         AssembleConvective_Oseen(plhs, prhs);
     }
 
@@ -2088,6 +2116,16 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         } else if(nlhs!=6) {
             mexErrMsgTxt("Exactly 6 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int nlnV2 = mexCheckedMulInt(nlnV, nlnV, "local convective matrix size");
+        int local_size = mexCheckedMulInt(
+            mexCheckedMulInt(nlnV2, dim, "local convective matrix size"),
+            dim, "local convective matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled convective output size");
 
         AssembleConvective(plhs, prhs);
     }
@@ -2102,6 +2140,16 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             mexErrMsgTxt("Exactly 6 output arguments are required.");
         }
 
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int nlnV2 = mexCheckedMulInt(nlnV, nlnV, "local ALE matrix size");
+        int local_size = mexCheckedMulInt(
+            mexCheckedMulInt(nlnV2, dim, "local ALE matrix size"),
+            dim, "local ALE matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled ALE output size");
+
         AssembleConvectiveALE(plhs, prhs);
     }
 
@@ -2114,6 +2162,19 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         } else if(nlhs!=5) {
             mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
 
         AssembleSUPG_SemiImplicit(plhs, prhs);
     }
@@ -2128,6 +2189,19 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
 
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+
         AssembleSUPG_Implicit(plhs, prhs);
     }
 
@@ -2141,6 +2215,19 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
 
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+
         AssembleSUPG_ImplicitALE(plhs, prhs);
     }
 
@@ -2153,6 +2240,19 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         } else if(nlhs!=5) {
             mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
 
         AssembleSUPG_ImplicitSteady(plhs, prhs);
     }

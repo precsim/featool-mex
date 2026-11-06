@@ -38,8 +38,34 @@ check_scalar(chkmex(), 1, 'chkmex');
 out = eindarr([10 20 30], [3 1]);
 check_equal(out, [30 10], 0, 'eindarr');
 
+out = eindarr([1 2 3; 4 5 6], [3 1]);
+check_equal(out, [3 6; 1 4], 0, 'eindarr wide matrix');
+
+caught = false;
+try
+    out = eindarr(complex([1 2 3]), 1); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'eindarr accepted complex input.');
+end
+
 out = earrind([10; 20; 30], 3);
 check_equal(out, 30, 0, 'earrind');
+
+out = earrind([1 2; 3 4], [2 1 2]);
+check_equal(out, [3 4; 1 2; 3 4], 0, 'earrind indexed rows');
+
+caught = false;
+try
+    out = earrind(complex([10; 20; 30]), 3); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'earrind accepted complex input.');
+end
 
 A = sparse([1 3], [1 2], [4 5], 3, 2);
 [jc, ir, ind, vals] = findsp(A);
@@ -48,21 +74,106 @@ check_equal(double(ir), [0 2], 0, 'findsp row indices');
 check_equal(double(ind), [0 5], 0, 'findsp linear indices');
 check_equal(vals, [4 5], 0, 'findsp values');
 
+caught = false;
+try
+    [jc, ir, ind, vals] = findsp(complex(A)); %#ok<ASGLU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'findsp accepted complex sparse input.');
+end
+
 unique_values = fsetop('unique', [3 1 3 2]);
 check_equal(sort(unique_values), [1 2 3], 0, 'fsetop unique');
+
+unique_values = fsetop('unique', [0 -0]);
+if numel(unique_values) ~= 1 || unique_values(1) ~= 0
+    error('SMOKE_MEX:Failure', 'fsetop distinguishes signed zero.');
+end
+
+cell_values = fsetop('unique', {0, -0});
+if numel(cell_values) ~= 1 || cell_values{1} ~= 0
+    error('SMOKE_MEX:Failure', 'fsetop cell equality distinguishes signed zero.');
+end
+
+membership = fsetop('ismember', [-0 1], [0 2]);
+check_equal(membership, [1 0], 0, 'fsetop signed zero ismember');
+
+value = fsetop('intersect', -0, 0);
+if numel(value) ~= 1 || value ~= 0
+    error('SMOKE_MEX:Failure', 'fsetop intersect distinguishes signed zero.');
+end
+
+value = fsetop('setdiff', [-0 1], 0);
+check_equal(value, 1, 0, 'fsetop signed zero setdiff');
+
+value = fsetop('setxor', -0, 0);
+if ~isempty(value)
+    error('SMOKE_MEX:Failure', 'fsetop setxor distinguishes signed zero.');
+end
+
+value = fsetop('union', -0, 0);
+if numel(value) ~= 1 || value ~= 0
+    error('SMOKE_MEX:Failure', 'fsetop union distinguishes signed zero.');
+end
 
 S = fsparse([1; 2], [1; 2], [1 + 2i; 3 + 4i], [2 2]);
 S_expected = sparse([1 2], [1 2], [1 + 2i 3 + 4i], 2, 2);
 check_equal(full(S), full(S_expected), 1e-12, 'fsparse complex');
 
+ii = repmat((1:8)', 8, 1);
+jj = kron((1:8)', ones(8, 1));
+vv = (1:64)';
+S = fsparse(ii, jj, vv, [8 8], 'sort', 8);
+S_expected = sparse(ii, jj, vv, 8, 8);
+check_equal(full(S), full(S_expected), 0, 'fsparse limited OpenMP team');
+
+full_complex = complex([1 0], [0 1]);
+S = fsparse(full_complex);
+check_equal(full(S), full_complex, 0, 'fsparse complex full conversion');
+
+caught = false;
+try
+    S = fsparse(double(intmax('int32')) + 1, 1, 1); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'fsparse accepted an index above INT_MAX.');
+end
+
 S = sparse([2 -1; -1 2]);
 S_set = spsetd(S, 1);
 check_equal(full(S_set), [1 0; -1 2], 0, 'spsetd');
 
+check_equal(full(S), [2 -1; -1 2], 0, 'spsetd input unchanged');
+
 S_complex = sparse([1 + 2i 3 + 4i; 5 + 6i 7 + 8i]);
-S_complex_set = spsetd(S_complex, 1);
-check_equal(full(S_complex_set), [1 0; 5 + 6i 7 + 8i], 0, ...
-    'spsetd complex');
+caught = false;
+try
+    S_complex_set = spsetd(S_complex, 1); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'spsetd accepted complex sparse input.');
+end
+
+caught = false;
+try
+    spsetd(S, 1);
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'spsetd allowed unsafe no-output mutation.');
+end
+
+S_far = sparse(100, 100);
+S_far(100, 100) = 2;
+S_far_set = spsetd(S_far, 100);
+check_equal(full(S_far_set(100, 100)), 1, 0, 'spsetd far row');
 
 caught = false;
 try

@@ -1,4 +1,5 @@
 #include "mex.h"
+#include <stddef.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -30,35 +31,35 @@
 */
 
 
-void dcopy(const double *restrict p1, double *restrict p2, const int n) {
-  int i;
+void dcopy(const double *restrict p1, double *restrict p2, const mwSize n) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
+  for (i = 0; i < (ptrdiff_t)n; i++) {
     p2[i] = p1[i];
   }
 }
 
-void dcopy_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const int n) {
-  int i;
+void dcopy_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const mwSize n) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
-    p2[i] = p1[(int)ind[i]];
+  for (i = 0; i < (ptrdiff_t)n; i++) {
+    p2[i] = p1[(mwIndex)ind[i]-1];
   }
 }
 
-void dsumx(const double *restrict p1, double *restrict p2, const int n, double x) {
-  int i;
+void dsumx(const double *restrict p1, double *restrict p2, const mwSize n, double x) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
+  for (i = 0; i < (ptrdiff_t)n; i++) {
     p2[i] += x * p1[i];
   }
 }
 
-void dsumx_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const int n, double x) {
-  int i;
+void dsumx_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const mwSize n, double x) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
-    p2[i] += x * p1[(int)ind[i]];
+  for (i = 0; i < (ptrdiff_t)n; i++) {
+    p2[i] += x * p1[(mwIndex)ind[i]-1];
   }
 }
 
@@ -68,13 +69,13 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   if (nrhs < 2 || nrhs > 3)
     mexErrMsgTxt("Expecting two or three input arguments.");
 
-  if (mxIsSparse(prhs[0]) || !mxIsDouble(prhs[0]))
+  if (mxIsSparse(prhs[0]) || mxIsComplex(prhs[0]) || !mxIsDouble(prhs[0]))
     mexErrMsgTxt("Expecting non-sparse double array as first input.");
 
-  if (mxIsSparse(prhs[1]) || !mxIsDouble(prhs[1]))
+  if (mxIsSparse(prhs[1]) || mxIsComplex(prhs[1]) || !mxIsDouble(prhs[1]))
     mexErrMsgTxt("Expecting non-sparse double array as second input.");
 
-  if (nrhs == 3 && (mxIsSparse(prhs[2]) || !mxIsDouble(prhs[2])))
+  if (nrhs == 3 && (mxIsSparse(prhs[2]) || mxIsComplex(prhs[2]) || !mxIsDouble(prhs[2])))
     mexErrMsgTxt("Expecting non-sparse double array as third input.");
 
   if (nlhs != 1)
@@ -118,8 +119,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
     } else {   // Use indices c
       for (int j = 0; j < np; j++) {
-        int off_p  = j*mp - 1;   // correct for 1 indexed c
-        int off_pc = j*nc;
+        mwSize off_p  = (mwSize)j*mp;
+        mwSize off_pc = (mwSize)j*nc;
 
         dcopy_dind(p + off_p, pc + off_pc, c, nc);
       }
@@ -146,7 +147,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
     } else {   // Use indices c
       for (int j = 0; j < np; j++) {
-        int off_p = j*mp - 1;   // correct for 1 indexed c
+        mwSize off_p = (mwSize)j*mp;
         if (j < nx) { xj = x[j]; }
 
         dsumx_dind(p + off_p, pc, c, nc, xj);

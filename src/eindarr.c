@@ -40,17 +40,17 @@
 */
 
 /*------------------------------------------------------------------------*/
-#define FUNC(npc, np, pc, p, c_Type, c) {                        \
-    const mwSize nc = mxGetNumberOfElements(prhs[1]);            \
-    const c_Type *restrict c = (c_Type *)mxGetData(prhs[1]);     \
-    p -= 1;                                                      \
-    for (mwSize j = 0; j < npc; j++) {                           \
+#define FUNC(npc, index_stride, outer_stride, pc, p, c_Type, c) { \
+    const mwSize nc = mxGetNumberOfElements(prhs[1]);              \
+    const c_Type *restrict c = (c_Type *)mxGetData(prhs[1]);       \
+    for (mwSize j = 0; j < npc; j++) {                             \
       int i;                                                     \
       POMP                                                       \
       for (i = 0; i < nc; i++) {                                 \
-        pc[i] = p[(mwSize)c[i]];                                 \
+        const mwSize ci = (mwSize)c[i];                           \
+        pc[i] = p[(ci-1)*index_stride + j*outer_stride];          \
       }                                                          \
-      p += np; pc += nc;                                         \
+      pc += nc;                                                   \
     }                                                            \
   }
 
@@ -69,31 +69,40 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   if (nrhs != 2 )
     mexErrMsgTxt("Expecting two input arguments.");
 
-  if(mxIsSparse(prhs[0]) || !(mxIsDouble(prhs[0]) || mxIsSingle(prhs[0])))
+  if(mxIsSparse(prhs[0]) || mxIsComplex(prhs[0]) ||
+     !(mxIsDouble(prhs[0]) || mxIsSingle(prhs[0])))
     mexErrMsgTxt("Expecting non-sparse double or single array as first input.");
 
-  if(mxIsSparse(prhs[1]) || !(mxIsDouble(prhs[1]) || mxIsSingle(prhs[1]) || mx_IsInt(prhs[1])))
+  if(mxIsSparse(prhs[1]) || mxIsComplex(prhs[1]) ||
+     !(mxIsDouble(prhs[1]) || mxIsSingle(prhs[1]) || mx_IsInt(prhs[1])))
     mexErrMsgTxt("Expecting non-sparse double, single, or integer array as second input.");
 
   if (nlhs != 1 )
     mexErrMsgTxt("Expecting one output argument.");
 
   const mwSize mp = mxGetM(prhs[0]);   // rows
-  mwSize np = mxGetN(prhs[0]);   // cols
+  const mwSize np = mxGetN(prhs[0]);   // cols
   const mwSize mc = mxGetM(prhs[1]);
   const mwSize nc = mxGetN(prhs[1]);
   const mwSize ndim = 2;
   mwSize dims[2];
   mwSize npc = 1;
+  mwSize index_stride = 1;
+  mwSize outer_stride = 0;
   if (mp==1 || np==1) {   // p vector
     dims[0] = mc; dims[1] = nc;
-    np = mp*np;
+    index_stride = 1;
+    outer_stride = 0;
   } else {   // p array
     dims[0] = mc*nc;
     if (mp > np) {   // Row array
-      dims[1] = np; np = mp;
+      dims[1] = np;
+      index_stride = 1;
+      outer_stride = mp;
     } else {   // Column array
       dims[1] = mp;
+      index_stride = mp;
+      outer_stride = 1;
     }
     npc = dims[1];   // Number of cols in output
   }
@@ -105,32 +114,32 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     plhs[0] = mxCreateNumericArray(ndim, dims, mxSINGLE_CLASS, mxREAL);
     float *restrict pc = (float *)mxGetData(plhs[0]);
 
-    if      (id == mxDOUBLE_CLASS) {FUNC(npc, np, pc, p, double,   c);}
-    else if (id == mxSINGLE_CLASS) {FUNC(npc, np, pc, p, float,    c);}
-    else if (id == mxUINT32_CLASS) {FUNC(npc, np, pc, p, uint32_T, c);}
-    else if (id == mxUINT16_CLASS) {FUNC(npc, np, pc, p, uint16_T, c);}
-    else if (id == mxUINT8_CLASS)  {FUNC(npc, np, pc, p, uint8_T,  c);}
-    else if (id == mxUINT64_CLASS) {FUNC(npc, np, pc, p, uint64_t, c);}
-    else if (id == mxINT32_CLASS)  {FUNC(npc, np, pc, p, int32_T,  c);}
-    else if (id == mxINT16_CLASS)  {FUNC(npc, np, pc, p, int16_T,  c);}
-    else if (id == mxINT8_CLASS)   {FUNC(npc, np, pc, p, int8_T,   c);}
-    else if (id == mxINT64_CLASS)  {FUNC(npc, np, pc, p, int64_t,  c);}
+    if      (id == mxDOUBLE_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, double,   c);}
+    else if (id == mxSINGLE_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, float,    c);}
+    else if (id == mxUINT32_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, uint32_T, c);}
+    else if (id == mxUINT16_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, uint16_T, c);}
+    else if (id == mxUINT8_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, uint8_T,  c);}
+    else if (id == mxUINT64_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, uint64_t, c);}
+    else if (id == mxINT32_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, int32_T,  c);}
+    else if (id == mxINT16_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, int16_T,  c);}
+    else if (id == mxINT8_CLASS)   {FUNC(npc, index_stride, outer_stride, pc, p, int8_T,   c);}
+    else if (id == mxINT64_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, int64_t,  c);}
 
   } else {   // Double
     double *restrict p = (double *)mxGetData(prhs[0]);
     plhs[0] = mxCreateNumericArray(ndim, dims, mxDOUBLE_CLASS, mxREAL);
     double *restrict pc =(double *)mxGetData(plhs[0]);
 
-    if      (id == mxDOUBLE_CLASS) {FUNC(npc, np, pc, p, double,   c);}
-    else if (id == mxSINGLE_CLASS) {FUNC(npc, np, pc, p, float,    c);}
-    else if (id == mxUINT32_CLASS) {FUNC(npc, np, pc, p, uint32_T, c);}
-    else if (id == mxUINT16_CLASS) {FUNC(npc, np, pc, p, uint16_T, c);}
-    else if (id == mxUINT8_CLASS)  {FUNC(npc, np, pc, p, uint8_T,  c);}
-    else if (id == mxUINT64_CLASS) {FUNC(npc, np, pc, p, uint64_t, c);}
-    else if (id == mxINT32_CLASS)  {FUNC(npc, np, pc, p, int32_T,  c);}
-    else if (id == mxINT16_CLASS)  {FUNC(npc, np, pc, p, int16_T,  c);}
-    else if (id == mxINT8_CLASS)   {FUNC(npc, np, pc, p, int8_T,   c);}
-    else if (id == mxINT64_CLASS)  {FUNC(npc, np, pc, p, int64_t,  c);}
+    if      (id == mxDOUBLE_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, double,   c);}
+    else if (id == mxSINGLE_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, float,    c);}
+    else if (id == mxUINT32_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, uint32_T, c);}
+    else if (id == mxUINT16_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, uint16_T, c);}
+    else if (id == mxUINT8_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, uint8_T,  c);}
+    else if (id == mxUINT64_CLASS) {FUNC(npc, index_stride, outer_stride, pc, p, uint64_t, c);}
+    else if (id == mxINT32_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, int32_T,  c);}
+    else if (id == mxINT16_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, int16_T,  c);}
+    else if (id == mxINT8_CLASS)   {FUNC(npc, index_stride, outer_stride, pc, p, int8_T,   c);}
+    else if (id == mxINT64_CLASS)  {FUNC(npc, index_stride, outer_stride, pc, p, int64_t,  c);}
 
   }
 

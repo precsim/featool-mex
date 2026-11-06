@@ -12,7 +12,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
   */
 
-  if (nrhs != 1 || !mxIsSparse(prhs[0]) || !mxIsDouble(prhs[0]))
+  if (nrhs != 1 || !mxIsSparse(prhs[0]) || !mxIsDouble(prhs[0]) ||
+      mxIsComplex(prhs[0]))
     mexErrMsgTxt("Expecting a real sparse matrix as input.");
 
 
