@@ -1,4 +1,5 @@
 #include "mex.h"
+#include <string.h>
 #include "matrix.h"
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {

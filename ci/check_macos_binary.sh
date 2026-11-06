@@ -24,16 +24,28 @@ while IFS= read -r -d '' binary; do
   {
     echo "===== $(basename "$binary") ====="
     file "$binary"
+    echo "architectures: $(lipo -archs "$binary")"
     otool -hv "$binary"
     otool -L "$binary"
     otool -l "$binary"
   } >> "$report_file"
 
-  file_output="$(file "$binary")"
-  if [[ "$file_output" != *"$expected_arch"* ]]; then
-    echo "$(basename "$binary"): expected architecture $expected_arch" >&2
+  archs="$(lipo -archs "$binary")"
+  if [[ "$archs" != "$expected_arch" ]]; then
+    echo "$(basename "$binary"): expected exactly $expected_arch, found $archs" >&2
     failed=1
   fi
+
+  deployment_target="$(
+    otool -l "$binary" |
+      awk '
+        $1 == "cmd" && $2 == "LC_BUILD_VERSION" { build = 1; legacy = 0; next }
+        $1 == "cmd" && $2 == "LC_VERSION_MIN_MACOSX" { legacy = 1; build = 0; next }
+        build && $1 == "minos" { print $2; exit }
+        legacy && $1 == "version" { print $2; exit }
+      '
+  )"
+  echo "minimum_macos: ${deployment_target:-unknown}" >> "$report_file"
 
   if [[ "$allow_openmp" != "true" ]]; then
     deps="$(otool -L "$binary")"

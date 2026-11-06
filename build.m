@@ -18,6 +18,11 @@ function info = build(varargin)
 %   files. Local opt/ files are never auto-discovered so release ABI
 %   settings cannot be changed accidentally.
 %
+%   BUILD(..., 'compiler', NAME) selects an installed compiler by matching
+%   NAME against MATLAB's compiler configuration names. This is primarily
+%   used by hosted Windows CI to select the MinGW support package because
+%   the sources require C99 variable-length arrays.
+%
 % Keep this file compatible with MATLAB R2011a.
 
 % Copyright 2013-2026 Precise Simulation, Ltd.
@@ -35,6 +40,7 @@ optdef.r2018a   = false;
 optdef.ver      = version();
 optdef.mx       = mexext();
 optdef.mexopts  = '';
+optdef.compiler = '';
 optdef.metadata = true;
 
 if mod(length(varargin), 2) ~= 0
@@ -108,6 +114,11 @@ for i = 1:length(targets)
     end
 
     mexopts_file = target_mexopts(opt.mexopts, target.language);
+    if isempty(mexopts_file) && ~isempty(opt.compiler)
+        mexopts_file = compiler_mexopts(opt.compiler, target.language);
+    end
+    args = [args c_standard_args(target.language, opt.mx, ...
+        mexopts_file, opt.compiler)]; %#ok<AGROW>
     if opt.openmp && target.openmp
         args = [args openmp_args(target.language, opt.mx, mexopts_file)]; %#ok<AGROW>
     end
@@ -135,8 +146,10 @@ for i = 1:length(targets)
     target_names{i} = targets(i).name;
 end
 
-info = make_build_info('matlab', opt.ver, opt.mx, opt.openmp, ...
-    opt.api, target_names, matlab_compiler_description());
+[compiler_description, linker_description] = ...
+    matlab_toolchain_description(opt.compiler);
+info = make_build_info('matlab', matlab_release(), opt.mx, opt.openmp, ...
+    opt.api, target_names, compiler_description, linker_description);
 if opt.metadata
     write_build_info(opt.outdir, info);
 end
@@ -158,6 +171,43 @@ end
 end
 
 
+function value = compiler_mexopts(compiler_name, language)
+if ~ischar(compiler_name)
+    error('BUILD:Compiler', 'compiler must be a character array.');
+end
+if strcmpi(language, 'cpp')
+    matlab_language = 'C++';
+else
+    matlab_language = 'C';
+end
+
+configs = mex.getCompilerConfigurations(matlab_language, 'Installed');
+value = '';
+matches = 0;
+for i = 1:length(configs)
+    name = configs(i).Name;
+    short_name = configs(i).ShortName;
+    if ~isempty(strfind(lower(name), lower(compiler_name))) || ...
+       ~isempty(strfind(lower(short_name), lower(compiler_name)))
+        value = configs(i).MexOpt;
+        matches = matches + 1;
+    end
+end
+if matches == 0
+    error('BUILD:Compiler', ...
+        'No installed %s compiler matches "%s".', matlab_language, compiler_name);
+elseif matches > 1
+    error('BUILD:Compiler', ...
+        'More than one installed %s compiler matches "%s".', ...
+        matlab_language, compiler_name);
+end
+if isempty(value)
+    error('BUILD:Compiler', ...
+        'Compiler "%s" does not expose a MEX options file.', compiler_name);
+end
+end
+
+
 function value = target_mexopts(config, language)
 if isempty(config)
     value = '';
@@ -172,6 +222,40 @@ elseif isstruct(config) && isfield(config, language)
 else
     error('BUILD:MexOptions', ...
         'mexopts must be a file path or a struct with c/cpp fields.');
+end
+end
+
+
+function value = matlab_release()
+value = '';
+try
+    value = version('-release');
+catch
+end
+if isempty(value)
+    value = version();
+elseif value(1) ~= 'R' && value(1) ~= 'r'
+    value = ['R' value];
+end
+end
+
+
+function args = c_standard_args(language, mx, mexopts, compiler_name)
+args = {};
+if ~strcmpi(language, 'c')
+    return
+end
+
+use_gnu_flags = ~strncmpi(mx, 'mexw', 4);
+hint = lower([compiler_name ' ' mexopts]);
+if ~isempty(strfind(hint, 'mingw')) || ...
+   ~isempty(strfind(hint, 'gcc')) || ...
+   ~isempty(strfind(hint, 'gnu')) || ...
+   ~isempty(strfind(hint, 'tdm'))
+    use_gnu_flags = true;
+end
+if use_gnu_flags
+    args = {'CFLAGS=$CFLAGS -std=c99'};
 end
 end
 
@@ -265,15 +349,36 @@ end
 end
 
 
-function description = matlab_compiler_description()
-description = 'unknown';
+function [compiler_description, linker_description] = ...
+    matlab_toolchain_description(compiler_name)
+compiler_description = 'unknown';
+linker_description = 'unknown';
 try
-    eval('cfg = mex.getCompilerConfigurations(''C'',''Selected'');');
+    if isempty(compiler_name)
+        eval('cfg = mex.getCompilerConfigurations(''C'',''Selected'');');
+    else
+        eval('all_cfg = mex.getCompilerConfigurations(''C'',''Installed'');');
+        cfg = all_cfg([]);
+        for i = 1:length(all_cfg)
+            if ~isempty(strfind(lower(all_cfg(i).Name), lower(compiler_name))) || ...
+               ~isempty(strfind(lower(all_cfg(i).ShortName), lower(compiler_name)))
+                cfg = all_cfg(i);
+                break
+            end
+        end
+    end
     if ~isempty(cfg)
-        description = cfg(1).Name;
+        compiler_description = cfg(1).Name;
         try
             if ~isempty(cfg(1).Version)
-                description = [description ' ' cfg(1).Version];
+                compiler_description = [compiler_description ' ' cfg(1).Version];
+            end
+        catch
+        end
+        try
+            linker_description = cfg(1).LinkerName;
+            if ~isempty(cfg(1).LinkerVersion)
+                linker_description = [linker_description ' ' cfg(1).LinkerVersion];
             end
         catch
         end

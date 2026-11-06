@@ -1,6 +1,10 @@
 function info = make_build_info(runtime_name, runtime_version, mex_extension, ...
-    openmp, api, target_names, compiler_description)
+    openmp, api, target_names, compiler_description, linker_description)
 %MAKE_BUILD_INFO Build metadata shared by MATLAB and Octave build drivers.
+
+if nargin < 8
+    linker_description = 'unknown';
+end
 
 info.runtime = runtime_name;
 info.arch = platform_tag_from_mex(mex_extension);
@@ -8,7 +12,10 @@ info.built_with = runtime_version;
 info.mex_extension = mex_extension;
 info.openmp = logical(openmp);
 info.api = api;
-info.source_sha = getenv('GITHUB_SHA');
+info.source_sha = getenv('MEX_SOURCE_SHA');
+if isempty(info.source_sha)
+    info.source_sha = getenv('GITHUB_SHA');
+end
 if isempty(info.source_sha)
     info.source_sha = 'unknown';
 end
@@ -20,7 +27,7 @@ else
 end
 linker_override = getenv('MEX_LINKER_DESCRIPTION');
 if isempty(linker_override)
-    info.linker = 'see verbose build log';
+    info.linker = linker_description;
 else
     info.linker = linker_override;
 end

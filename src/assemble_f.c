@@ -2043,15 +2043,23 @@ void AssembleSUPG_ImplicitSteady(mxArray* plhs[], const mxArray* prhs[])
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 {
 
+    if (nrhs < 1 || !mxIsChar(prhs[0])) {
+        mexErrMsgTxt("First input must be an assembly name.");
+    }
     char *Assembly_name = mxArrayToString(prhs[0]);
+    if (Assembly_name == NULL) {
+        mexErrMsgTxt("Could not read assembly name.");
+    }
+    int recognized = 0;
 
     if (strcmp(Assembly_name, "Stokes")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=13) {
             mexErrMsgTxt("13 inputs are required.");
-        } else if(nlhs>3) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=3) {
+            mexErrMsgTxt("Exactly 3 output arguments are required.");
         }
 
         AssembleStokes(plhs, prhs);
@@ -2060,11 +2068,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "convective_Oseen")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=12) {
             mexErrMsgTxt("12 inputs are required.");
-        } else if(nlhs>3) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=3) {
+            mexErrMsgTxt("Exactly 3 output arguments are required.");
         }
 
         AssembleConvective_Oseen(plhs, prhs);
@@ -2072,11 +2081,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "convective")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=12) {
             mexErrMsgTxt("12 inputs are required.");
-        } else if(nlhs>6) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=6) {
+            mexErrMsgTxt("Exactly 6 output arguments are required.");
         }
 
         AssembleConvective(plhs, prhs);
@@ -2084,11 +2094,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "convectiveALE")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=13) {
             mexErrMsgTxt("13 inputs are required.");
-        } else if(nlhs>6) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=6) {
+            mexErrMsgTxt("Exactly 6 output arguments are required.");
         }
 
         AssembleConvectiveALE(plhs, prhs);
@@ -2096,11 +2107,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "SUPG_SemiImplicit")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=20) {
             mexErrMsgTxt("20 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
 
         AssembleSUPG_SemiImplicit(plhs, prhs);
@@ -2108,11 +2120,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "SUPG_Implicit")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=20) {
             mexErrMsgTxt("20 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
 
         AssembleSUPG_Implicit(plhs, prhs);
@@ -2120,11 +2133,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "SUPG_ImplicitALE")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=22) {
             mexErrMsgTxt("22 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
 
         AssembleSUPG_ImplicitALE(plhs, prhs);
@@ -2132,16 +2146,21 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "SUPG_ImplicitSteady")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=17) {
             mexErrMsgTxt("17 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
 
         AssembleSUPG_ImplicitSteady(plhs, prhs);
     }
 
+    if (!recognized) {
+        mxFree(Assembly_name);
+        mexErrMsgTxt("Unknown assembly name.");
+    }
     mxFree(Assembly_name);
 }
 /*************************************************************************/

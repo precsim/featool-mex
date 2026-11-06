@@ -32,6 +32,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
   if (nrhs != 2)
     mexErrMsgTxt("Expecting two input arguments.");
+  if (nlhs > 1)
+    mexErrMsgTxt("Expecting at most one output argument.");
 
   if (!mxIsSparse(prhs[0]) || !mxIsDouble(prhs[0]))
     mexErrMsgTxt("Expecting sparse double matrix as first input.");
@@ -40,13 +42,21 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     mexErrMsgTxt("Expecting full double array as second input.");
 
 
-  /* Sparse matrix A */
-  const mwIndex *restrict jca = mxGetJc(prhs[0]);
-  const mwIndex *restrict ira = mxGetIr(prhs[0]);
-  const mwSize nrows = mxGetM(prhs[0]);
-  const mwSize ncols = mxGetN(prhs[0]);
+  /*
+     Sparse matrix A.  Preserve the historical no-output in-place behavior,
+     but provide a safe copy-on-write path when an output is requested.
+  */
+  mxArray *a = (mxArray *)prhs[0];
+  if (nlhs == 1) {
+    plhs[0] = mxDuplicateArray(prhs[0]);
+    a = plhs[0];
+  }
+  const mwIndex *restrict jca = mxGetJc(a);
+  const mwIndex *restrict ira = mxGetIr(a);
+  const mwSize nrows = mxGetM(a);
+  const mwSize ncols = mxGetN(a);
   const mwIndex na = *(jca + ncols);
-  double *restrict pa = (double *)mxGetData(prhs[0]);
+  double *restrict pa = (double *)mxGetData(a);
   if (na < 1) {return;}
 
   /* Row pointers */

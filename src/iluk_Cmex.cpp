@@ -6,7 +6,6 @@
 #include <vector>
 
 #define CHECK_INPUT
-#undef  CHECK_INPUT
 #define ENABLE_PROFILE
 #undef ENABLE_PROFILE
 
@@ -109,12 +108,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 
         // fill level lfil
         lfil = static_cast<int>(mxGetScalar(prhs[1]));
-        ++lfil; // use a shifted level of fill
         #ifdef CHECK_INPUT
         if(lfil < 0) {
                 mexErrMsgTxt("Fill level must be at least 0");
         }
         #endif
+        ++lfil; // use a shifted level of fill
 
         // level data structure: 0 <= level[i][j] <= lfil is the level of fill for
         // permitted fill-in entries

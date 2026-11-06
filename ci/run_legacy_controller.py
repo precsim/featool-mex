@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--platform", required=True)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-sha", required=True)
     return parser.parse_args()
 
 
@@ -46,6 +47,8 @@ def main() -> int:
         str(args.source.resolve()),
         "--output",
         str(args.output.resolve()),
+        "--source-sha",
+        args.source_sha,
         "--serial",
         "--smoke-test",
     ]

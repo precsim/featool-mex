@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -23,6 +24,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--platform", required=True)
     parser.add_argument("--audit-file", type=Path)
     parser.add_argument("--compatibility", default="build-runtime smoke test passed")
+    parser.add_argument("--source-sha")
+    parser.add_argument("--built-with")
     return parser.parse_args()
 
 
@@ -70,6 +73,31 @@ def main() -> int:
         )
     if metadata.get("openmp") is not False:
         raise SystemExit("baseline artifact must have openmp=false")
+    if metadata.get("mex_extension") != extension:
+        raise SystemExit(
+            f"BUILD-INFO mex_extension={metadata.get('mex_extension')!r}, "
+            f"expected {extension!r}"
+        )
+    if args.built_with and metadata.get("built_with") != args.built_with:
+        raise SystemExit(
+            f"BUILD-INFO built_with={metadata.get('built_with')!r}, "
+            f"expected {args.built_with!r}"
+        )
+    if sorted(metadata.get("targets", [])) != sorted(target_names):
+        raise SystemExit(
+            "BUILD-INFO target list does not match build_manifest.m"
+        )
+    expected_sha = args.source_sha or os.environ.get("GITHUB_SHA")
+    if expected_sha:
+        if metadata.get("source_sha") != expected_sha:
+            raise SystemExit(
+                f"BUILD-INFO source_sha={metadata.get('source_sha')!r}, "
+                f"expected {expected_sha!r}"
+            )
+    elif metadata.get("source_sha") in (None, "", "unknown"):
+        raise SystemExit(
+            "BUILD-INFO source_sha is unknown and no expected source SHA was supplied"
+        )
 
     metadata["compatibility_statement"] = args.compatibility
     if args.audit_file:

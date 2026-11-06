@@ -24,6 +24,7 @@ mex-legacy-build
   --platform <repository platform tag>
   --source <checked-out repository>
   --output <artifact directory>
+  --source-sha <full Git commit SHA>
   --serial
   --smoke-test
 ```
@@ -34,20 +35,44 @@ running `test/smoke_mex.m` on that same runtime, and copying the resulting
 artifact directory back to `--output`. It must propagate any build or smoke
 failure as a non-zero exit code.
 
+The driver must set `MEX_SOURCE_SHA` to the supplied `--source-sha` inside
+the build appliance before invoking MATLAB/Octave. Release finalization rejects
+missing or mismatched `BUILD-INFO.json` source provenance.
+
 Before invoking MATLAB, the appliance should set
 `MEX_COMPILER_DESCRIPTION` and `MEX_LINKER_DESCRIPTION` to versioned
 toolchain descriptions. These values are written into `BUILD-INFO.json`;
 they are especially useful for R2011a, where modern MATLAB compiler
 configuration APIs are unavailable.
 
+Controller hosts also need Python 3 because the workflow runs the repository
+audit/finalization scripts there. Linux controllers need `file`, `readelf`,
+`objdump`, and `ldd`; Windows controllers need PowerShell plus `dumpbin`;
+macOS controllers need `bash`, `file`, `lipo`, and `otool`. These tools
+inspect the returned binaries on the controller rather than inside the preserved
+appliance.
+
+All C targets require C99. The appliance must configure C compilation with
+`-std=c99` (or an equivalent verified mode) in its explicit MEX options. The
+repository build driver also adds `-std=c99` automatically for GNU/Clang-like
+toolchains that it can identify.
+
 Expected MATLAB appliances:
 
 | Platform | Compatibility runtime | Environment objective |
 | --- | --- | --- |
-| `windows-x86_64` | R2011a x64 | compiler supported by the preserved MATLAB installation |
+| `windows-x86_64` | R2011a x64 | verified C99-capable compiler/toolchain selected through explicit MEX options |
 | `linux-x86_64` | R2011a x64 | glibc 2.5-class userspace/sysroot and supported GCC |
 | `macos-x86_64` | R2011a Intel | oldest practical preserved macOS/Xcode combination |
 | `macos-arm64` | R2023b arm64 | preserved supported Apple-silicon macOS environment |
+
+The Windows sources use C99 features including variable-length arrays and
+declarations in `for` initializers. If the compiler officially supported by
+the preserved R2011a installation cannot compile those sources, the controller
+must use an explicitly configured and validated C99-capable MEX toolchain
+(for example through the per-language `mexopts.c`/`mexopts.cpp` support in
+`build.m`). Do not claim an official-compiler R2011a build unless that exact
+compiler has passed the full build and smoke suite.
 
 The workflow performs platform binary inspection after the appliance returns
 the artifacts. The Linux R2011a job enforces a maximum imported

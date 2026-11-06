@@ -19,6 +19,7 @@ TARGET_RE = re.compile(
 )
 DEP_RE = re.compile(r"'(src_dep/[^']+\.(?:c|cpp))'")
 INCLUDE_RE = re.compile(r'^\s*#include\s+"src_dep/([^"]+)\.h"', re.MULTILINE)
+BOOL_RE = re.compile(r"\b(true|false)\b")
 
 
 def fail(message: str) -> None:
@@ -31,7 +32,7 @@ def main() -> int:
     if not matches:
         fail("no targets found")
 
-    entries: list[tuple[int, str, str, str, set[str]]] = []
+    entries: list[tuple[int, str, str, str, set[str], bool, bool]] = []
     for index, match in enumerate(matches):
         start = match.start()
         end = matches[index + 1].start() if index + 1 < len(matches) else text.find("\nend", start)
@@ -39,8 +40,22 @@ def main() -> int:
             end = len(text)
         block = text[start:end]
         deps = set(DEP_RE.findall(block))
+        flags = BOOL_RE.findall(block)
+        if len(flags) != 2:
+            fail(
+                f"{match.group(2)}: expected exactly two boolean manifest flags "
+                f"(blas/openmp), found {flags}"
+            )
         entries.append(
-            (int(match.group(1)), match.group(2), match.group(3), match.group(4), deps)
+            (
+                int(match.group(1)),
+                match.group(2),
+                match.group(3),
+                match.group(4),
+                deps,
+                flags[0] == "true",
+                flags[1] == "true",
+            )
         )
 
     indices = [entry[0] for entry in entries]
@@ -59,7 +74,7 @@ def main() -> int:
         fail(f"source mismatch; missing={missing}, extra={extra}")
 
     names: set[str] = set()
-    for _, name, language, source, deps in entries:
+    for _, name, language, source, deps, blas, openmp in entries:
         if name in names:
             fail(f"duplicate target name: {name}")
         names.add(name)
@@ -86,6 +101,25 @@ def main() -> int:
         for dep in deps:
             if not (SRC / dep).is_file():
                 fail(f"{name}: dependency does not exist: {dep}")
+
+        dependency_text = "\n".join(
+            (SRC / dep).read_text(encoding="utf-8", errors="replace")
+            for dep in sorted(deps)
+        )
+        combined_text = source_text + "\n" + dependency_text
+        has_openmp = "_OPENMP" in combined_text or "#pragma omp" in combined_text
+        if openmp != has_openmp:
+            fail(
+                f"{name}: openmp={openmp}, but source OpenMP usage={has_openmp}"
+            )
+
+        has_blas_header = (
+            '"blas.h"' in combined_text or "<blas.h>" in combined_text
+        )
+        if blas != has_blas_header:
+            fail(
+                f"{name}: blas={blas}, but MATLAB BLAS header usage={has_blas_header}"
+            )
 
     if len(entries) != len(source_files):
         fail(f"expected {len(source_files)} targets, found {len(entries)}")

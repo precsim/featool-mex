@@ -41,8 +41,8 @@ S_expected = sparse([1 2], [1 2], [1 + 2i 3 + 4i], 2, 2);
 check_equal(full(S), full(S_expected), 1e-12, 'fsparse complex');
 
 S = sparse([2 -1; -1 2]);
-spsetd(S, 1);
-check_equal(full(S), [1 0; -1 2], 0, 'spsetd');
+S_set = spsetd(S, 1);
+check_equal(full(S_set), [1 0; -1 2], 0, 'spsetd');
 
 [L, U, levels] = iluk_Cmex(speye(3), 0);
 check_equal(full(L), eye(3), 1e-12, 'iluk_Cmex L');
@@ -59,6 +59,17 @@ check_equal(coef, 1, 1e-12, 'assemble_m values');
 [rows, coef] = assemble_se(2, 1, 1, 1, 1, 1);
 check_equal(rows, 1, 0, 'assemble_se rows');
 check_equal(coef, 2, 1e-12, 'assemble_se values');
+
+[rows, coef] = assemble_s(2, 'Linear_forces', [1 .25], [0; 0], ...
+    1, 1, 1, [1 0 0 1], 1, 1, [0 0]);
+check_equal(rows, [1; 2], 0, 'assemble_s rows');
+check_equal(coef, [0; 0], 1e-12, 'assemble_s values');
+
+[rows, cols, coef] = assemble_f('Stokes', 1, 1, 1, 1, 1, 1, ...
+    1, 1, 1, 1, 1, 1);
+check_equal(rows, [1; 1; 2], 0, 'assemble_f rows');
+check_equal(cols, [1; 2; 1], 0, 'assemble_f columns');
+check_equal(coef, [2; -1; 1], 1e-12, 'assemble_f values');
 
 fprintf(1, 'All MEX smoke tests passed.\n');
 end

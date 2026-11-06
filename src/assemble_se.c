@@ -18,8 +18,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     /* Check for proper number of arguments. */
     if(nrhs!=6) {
         mexErrMsgTxt("6 inputs are required.");
-    } else if(nlhs>2) {
-        mexErrMsgTxt("Too many output arguments.");
+    } else if(nlhs!=2) {
+        mexErrMsgTxt("Exactly 2 output arguments are required.");
     }
     
     double* f   = mxGetPr(prhs[0]);

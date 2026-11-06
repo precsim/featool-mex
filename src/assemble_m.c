@@ -17,8 +17,8 @@ void mexFunction(int nlhs,mxArray* plhs[], int nrhs, const mxArray* prhs[])
     /* Check for proper number of arguments. */
     if(nrhs!=6) {
         mexErrMsgTxt("6 inputs are required.");
-    } else if(nlhs>3) {
-        mexErrMsgTxt("Too many output arguments.");
+    } else if(nlhs!=3) {
+        mexErrMsgTxt("Exactly 3 output arguments are required.");
     }
 
     double* dim_ptr = mxGetPr(prhs[0]);

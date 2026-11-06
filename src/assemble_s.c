@@ -26,17 +26,36 @@
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 {
 
-    /* Check for proper number of arguments. */
-
-    /*
     if(nrhs!=11) {
         mexErrMsgTxt("11 inputs are required.");
-    } else if(nlhs>6) {
-        mexErrMsgTxt("Too many output arguments.");
     }
-    */
+    if (!mxIsChar(prhs[1])) {
+        mexErrMsgTxt("Second input must be a material model name.");
+    }
 
     char *Material_Model = mxArrayToString(prhs[1]);
+    if (Material_Model == NULL) {
+        mexErrMsgTxt("Could not read material model name.");
+    }
+
+    int expected_nlhs = 0;
+    if (strstr(Material_Model, "_forces") != NULL ||
+        strstr(Material_Model, "_stress") != NULL) {
+        expected_nlhs = 2;
+    } else if (strstr(Material_Model, "_jacobian") != NULL) {
+        expected_nlhs = 3;
+    } else if (strcmp(Material_Model, "NeoHookean_prestress") == 0) {
+        expected_nlhs = 6;
+    }
+    if (expected_nlhs == 0) {
+        mxFree(Material_Model);
+        mexErrMsgTxt("Unknown material model.");
+    }
+    if (nlhs != expected_nlhs) {
+        mxFree(Material_Model);
+        mexErrMsgTxt("Incorrect number of output arguments for material model.");
+    }
+
     double* dim_ptr = mxGetPr(prhs[0]);
     int dim     = (int)(dim_ptr[0]);
 

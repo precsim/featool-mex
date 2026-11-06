@@ -9,7 +9,7 @@ on:
       include_legacy:
         description: Run preserved MATLAB compatibility builders
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -75,6 +75,7 @@ jobs:
           --platform "${{ matrix.platform }}"
           --source .
           --output "dist/matlab/${{ matrix.platform }}"
+          --source-sha "${{ github.sha }}"
 
       - name: Enforce Linux compatibility ABI
         if: matrix.audit == 'linux'
@@ -116,7 +117,9 @@ jobs:
           --extension "${{ matrix.extension }}"
           --runtime matlab
           --platform "${{ matrix.platform }}"
+          --built-with "${{ matrix.version }}"
           --audit-file "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          --source-sha "${{ github.sha }}"
           --compatibility "${{ matrix.version }} compatibility build, same-runtime smoke test, and binary audit passed"
 
       - name: Upload immutable compatibility artifact
@@ -223,6 +226,18 @@ jobs:
             } > "$dir/FORWARD-VALIDATION.txt"
           done
 
+      - name: Refresh artifact checksums after validation record
+        run: |
+          for dir in release/matlab-*; do
+            (
+              cd "$dir"
+              find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' |
+                sort -z |
+                xargs -0 sha256sum > SHA256SUMS
+            )
+            python3 ci/verify_checksums.py "$dir"
+          done
+
       - name: Create platform bundles
         run: |
           mkdir -p bundles
@@ -230,12 +245,15 @@ jobs:
             name="$(basename "$dir")"
             (cd release && zip -qr "../bundles/$name.zip" "$name")
           done
+          (cd bundles && sha256sum *.zip > SHA256SUMS)
 
       - name: Upload release bundles
         uses: actions/upload-artifact@v7
         with:
           name: matlab-release-bundles
-          path: bundles/*.zip
+          path: |
+            bundles/*.zip
+            bundles/SHA256SUMS
           if-no-files-found: error
           retention-days: 90
 
@@ -255,4 +273,9 @@ jobs:
       - name: Attach bundles to GitHub Release
         env:
           GH_TOKEN: "${{ github.token }}"
-        run: gh release create "$GITHUB_REF_NAME" bundles/*.zip --generate-notes
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          bundles/*.zip
+          bundles/SHA256SUMS
+          --repo "$GITHUB_REPOSITORY"
+          --generate-notes
