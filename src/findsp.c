@@ -1,4 +1,5 @@
 #include "mex.h"
+#include <stdint.h>
 #include <string.h>
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
@@ -11,6 +12,9 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
      v = non-zero values (1,nnz)
 
   */
+
+  if (nlhs > 4)
+    mexErrMsgTxt("findsp supports at most four output arguments.");
 
   if (nrhs != 1 || !mxIsSparse(prhs[0]) || !mxIsDouble(prhs[0]) ||
       mxIsComplex(prhs[0]))
@@ -25,11 +29,11 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   if (nlhs >= 1) {
     const mwSize dims[] = {1, ncols+1};
     plhs[0] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
-    mwIndex *p = (mwIndex *) mxGetData(plhs[0]);
+    uint64_t *p = (uint64_t *) mxGetData(plhs[0]);
     /* for (mwSize i = 0; i < ncols+1; i++) { */
     /*   p[i] = *(jc + i); */
     /* } */
-    memcpy(p, jc, (ncols+1)*sizeof(mwIndex));
+    memcpy(p, jc, (ncols+1)*sizeof(uint64_t));
   }
 
   /* Row index vector */
@@ -38,23 +42,29 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   if (nlhs >= 2) {
     const mwSize dims[] = {1, nnz};
     plhs[1] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
-    mwIndex *p = (mwIndex *) mxGetData(plhs[1]);
+    uint64_t *p = (uint64_t *) mxGetData(plhs[1]);
     /* for (mwSize i = 0; i < nnz; i++) { */
     /*   p[i] = *(ir + i); */
     /* } */
-    memcpy(p, ir, nnz*sizeof(mwIndex));
+    if (nnz != 0)
+      memcpy(p, ir, nnz*sizeof(uint64_t));
   }
 
   /* Index vector */
   if (nlhs >= 3) {
     const mwSize dims[] = {1, nnz};
     plhs[2] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
-    mwIndex *p = (mwIndex *) mxGetData(plhs[2]);
+    uint64_t *p = (uint64_t *) mxGetData(plhs[2]);
     mwSize i = 0;
     const mwSize nrows = mxGetM(prhs[0]);
     for (mwSize icol = 0; icol < ncols; icol++) {
       for (mwSize ia = *(jc+icol); ia < *(jc+icol+1); ia++) {
-        p[i++] = *(ir + ia) + icol*nrows;
+        const uint64_t row = (uint64_t)*(ir + ia);
+        const uint64_t col = (uint64_t)icol;
+        const uint64_t rows = (uint64_t)nrows;
+        if (rows != 0 && col > (UINT64_MAX - row)/rows)
+          mexErrMsgTxt("Linear index exceeds the uint64 range.");
+        p[i++] = row + col*rows;
       }
     }
   }
@@ -67,7 +77,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     /* for (mwSize i = 0; i < nnz; i++) { */
     /*   p[i] = *(avals + i); */
     /* } */
-    memcpy(p, avals, nnz*sizeof(double));
+    if (nnz != 0)
+      memcpy(p, avals, nnz*sizeof(double));
   }
 
 }
