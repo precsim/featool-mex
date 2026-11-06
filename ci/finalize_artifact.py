@@ -55,9 +55,16 @@ def main() -> int:
     if missing:
         raise SystemExit(f"missing expected MEX targets: {', '.join(missing)}")
 
-    wrapper = directory / "iluk.m"
-    if not wrapper.is_file():
-        raise SystemExit(f"missing required wrapper: {wrapper}")
+    wrapper_names = sorted(
+        path.name for path in (ROOT / "src").glob("*.m") if path.is_file()
+    )
+    missing_wrappers = [
+        name for name in wrapper_names if not (directory / name).is_file()
+    ]
+    if missing_wrappers:
+        raise SystemExit(
+            "missing required wrappers: " + ", ".join(missing_wrappers)
+        )
 
     metadata_path = directory / "BUILD-INFO.json"
     if not metadata_path.is_file():
@@ -99,11 +106,44 @@ def main() -> int:
             "BUILD-INFO source_sha is unknown and no expected source SHA was supplied"
         )
 
-    metadata["compatibility_statement"] = args.compatibility
+    audit = None
     if args.audit_file:
         audit = args.audit_file.resolve()
         if not audit.is_file():
             raise SystemExit(f"audit file does not exist: {audit}")
+
+    nested_entries = sorted(
+        path.relative_to(directory).as_posix()
+        for path in directory.rglob("*")
+        if path.parent != directory or path.is_dir()
+    )
+    if nested_entries:
+        raise SystemExit(
+            "artifact directory must be flat; unexpected nested entries: "
+            + ", ".join(nested_entries)
+        )
+
+    allowed_files = {
+        *(f"{name}.{extension}" for name in target_names),
+        *wrapper_names,
+        "BUILD-INFO.json",
+        "COMPATIBILITY.txt",
+        "SHA256SUMS",
+    }
+    if audit is not None and audit.parent == directory:
+        allowed_files.add(audit.name)
+    unexpected_files = sorted(
+        path.name
+        for path in directory.iterdir()
+        if path.is_file() and path.name not in allowed_files
+    )
+    if unexpected_files:
+        raise SystemExit(
+            "unexpected artifact files: " + ", ".join(unexpected_files)
+        )
+
+    metadata["compatibility_statement"] = args.compatibility
+    if audit is not None:
         if audit.suffix.lower() == ".json":
             metadata["binary_audit"] = json.loads(audit.read_text(encoding="utf-8"))
         else:
@@ -139,17 +179,6 @@ def main() -> int:
         "OpenMP: disabled\n",
         encoding="utf-8",
     )
-
-    nested_entries = sorted(
-        path.relative_to(directory).as_posix()
-        for path in directory.rglob("*")
-        if path.parent != directory or path.is_dir()
-    )
-    if nested_entries:
-        raise SystemExit(
-            "artifact directory must be flat; unexpected nested entries: "
-            + ", ".join(nested_entries)
-        )
 
     checksum_path = directory / "SHA256SUMS"
     files = sorted(
