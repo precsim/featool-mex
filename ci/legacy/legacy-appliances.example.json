@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "appliances": [
+    {
+      "runtime": "matlab",
+      "version": "R2011a",
+      "platform": "linux-x86_64",
+      "command": [
+        "/opt/featool-mex/appliances/matlab-r2011a-linux"
+      ],
+      "probe_command": [
+        "/opt/featool-mex/appliances/matlab-r2011a-linux",
+        "--probe"
+      ]
+    },
+    {
+      "runtime": "matlab",
+      "version": "R2011a",
+      "platform": "windows-x86_64",
+      "command": [
+        "C:\\ProgramData\\featool-mex\\appliances\\matlab-r2011a-windows.exe"
+      ],
+      "probe_command": [
+        "C:\\ProgramData\\featool-mex\\appliances\\matlab-r2011a-windows.exe",
+        "--probe"
+      ]
+    },
+    {
+      "runtime": "matlab",
+      "version": "R2011a",
+      "platform": "macos-x86_64",
+      "command": [
+        "/usr/local/libexec/featool-mex/matlab-r2011a-macos-x64"
+      ],
+      "probe_command": [
+        "/usr/local/libexec/featool-mex/matlab-r2011a-macos-x64",
+        "--probe"
+      ]
+    },
+    {
+      "runtime": "matlab",
+      "version": "R2023b",
+      "platform": "macos-arm64",
+      "command": [
+        "/usr/local/libexec/featool-mex/matlab-r2023b-macos-arm64"
+      ],
+      "probe_command": [
+        "/usr/local/libexec/featool-mex/matlab-r2023b-macos-arm64",
+        "--probe"
+      ]
+    },
+    {
+      "runtime": "octave",
+      "version": "<validated-version>",
+      "platform": "linux-x86_64",
+      "command": [
+        "/opt/featool-mex/appliances/octave-linux"
+      ],
+      "probe_command": [
+        "/opt/featool-mex/appliances/octave-linux",
+        "--probe"
+      ]
+    },
+    {
+      "runtime": "octave",
+      "version": "<validated-version>",
+      "platform": "windows-x86_64",
+      "command": [
+        "C:\\ProgramData\\featool-mex\\appliances\\octave-windows.exe"
+      ],
+      "probe_command": [
+        "C:\\ProgramData\\featool-mex\\appliances\\octave-windows.exe",
+        "--probe"
+      ]
+    },
+    {
+      "runtime": "octave",
+      "version": "<validated-version>",
+      "platform": "macos-x86_64",
+      "command": [
+        "/usr/local/libexec/featool-mex/octave-macos-x64"
+      ],
+      "probe_command": [
+        "/usr/local/libexec/featool-mex/octave-macos-x64",
+        "--probe"
+      ]
+    },
+    {
+      "runtime": "octave",
+      "version": "<validated-version>",
+      "platform": "macos-arm64",
+      "command": [
+        "/usr/local/libexec/featool-mex/octave-macos-arm64"
+      ],
+      "probe_command": [
+        "/usr/local/libexec/featool-mex/octave-macos-arm64",
+        "--probe"
+      ]
+    }
+  ]
+}
