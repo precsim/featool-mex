@@ -134,7 +134,8 @@ compatibility release:
 The repository variable `ENABLE_MEX_LEGACY_RELEASE=true` is required before a
 version tag can schedule these controller jobs. This prevents releases from
 silently queueing for absent self-hosted runners. A manual workflow dispatch
-can also explicitly select the compatibility builders.
+runs the same compatibility builders and validation chain without publishing a
+GitHub Release.
 
 MATLAB licenses and credentials belong in the appliance/controller's protected
 configuration or GitHub secrets. They must not be copied into this repository,

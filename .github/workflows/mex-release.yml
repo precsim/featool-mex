@@ -5,12 +5,6 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      include_compatibility:
-        description: Run preserved MATLAB and Octave compatibility builders
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -31,7 +25,7 @@ jobs:
       - name: Require MATLAB compatibility ABI ceilings
         if: >-
           github.event_name == 'push' ||
-          (github.event_name == 'workflow_dispatch' && inputs.include_compatibility)
+          github.event_name == 'workflow_dispatch'
         env:
           MATLAB_R2011A_LINUX_MAX_GLIBCXX: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GLIBCXX }}"
           MATLAB_R2011A_LINUX_MAX_CXXABI: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_CXXABI }}"
@@ -50,7 +44,7 @@ jobs:
       - name: Require Octave compatibility infrastructure and version floors
         if: >-
           github.event_name == 'push' ||
-          (github.event_name == 'workflow_dispatch' && inputs.include_compatibility)
+          github.event_name == 'workflow_dispatch'
         env:
           ENABLE_OCTAVE: "${{ vars.ENABLE_MEX_OCTAVE_RELEASE }}"
           OCTAVE_WINDOWS_VERSION: "${{ vars.MEX_OCTAVE_WINDOWS_VERSION }}"
@@ -81,7 +75,7 @@ jobs:
     name: Compatibility build ${{ matrix.platform }}
     needs: preflight
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.include_compatibility) ||
+      github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && vars.ENABLE_MEX_LEGACY_RELEASE == 'true')
     strategy:
       fail-fast: false
@@ -239,7 +233,7 @@ jobs:
     name: Octave compatibility build ${{ matrix.platform }}
     needs: preflight
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.include_compatibility) ||
+      github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && vars.ENABLE_MEX_OCTAVE_RELEASE == 'true')
     strategy:
       fail-fast: false
