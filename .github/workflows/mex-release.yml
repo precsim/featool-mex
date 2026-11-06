@@ -35,7 +35,6 @@ jobs:
             audit: linux
             audit_file: linux-ABI.json
             compiler: ''
-            products: ''
           - runner: windows-2022
             release: R2023a
             platform: windows-x86_64
@@ -43,7 +42,6 @@ jobs:
             audit: windows
             audit_file: windows-ABI.txt
             compiler: mingw
-            products: MATLAB_Support_for_MinGW-w64_C/C++/Fortran_Compiler
           - runner: macos-15-intel
             release: R2024b
             platform: macos-x86_64
@@ -51,7 +49,6 @@ jobs:
             audit: macos-x86_64
             audit_file: macos-ABI.txt
             compiler: ''
-            products: ''
           - runner: macos-15
             release: R2024b
             platform: macos-arm64
@@ -59,7 +56,6 @@ jobs:
             audit: macos-arm64
             audit_file: macos-ABI.txt
             compiler: ''
-            products: ''
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -68,7 +64,41 @@ jobs:
         uses: matlab-actions/setup-matlab@v3
         with:
           release: ${{ matrix.release }}
-          products: ${{ matrix.products }}
+
+      - name: Install supported MinGW 8.1 on Windows
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        env:
+          MINGW_URL: https://download.qt.io/development_releases/prebuilt/mingw_64/x86_64-8.1.0-release-posix-seh-rt_v6-rev0.7z
+          MINGW_SHA256: 853970527b5de4a55ec8ca4d3fd732c00ae1c69974cc930c82604396d43e79f8
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'mingw-8.1.0.7z'
+          $extractRoot = Join-Path $env:RUNNER_TEMP 'mingw-8.1.0'
+          Invoke-WebRequest -Uri $env:MINGW_URL -OutFile $archive
+
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:MINGW_SHA256) {
+            throw "MinGW archive checksum mismatch: $actualHash"
+          }
+
+          $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "7-Zip was not found at $sevenZip"
+          }
+          & $sevenZip x $archive "-o$extractRoot" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed with exit code $LASTEXITCODE"
+          }
+
+          $mingwRoot = Join-Path $extractRoot 'mingw64'
+          $gcc = Join-Path $mingwRoot 'bin\gcc.exe'
+          if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
+            throw "MinGW GCC was not found at $gcc"
+          }
+
+          "MW_MINGW64_LOC=$mingwRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          (Join-Path $mingwRoot 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $gcc --version
 
       - name: Build serial MEX files and run same-runtime smoke tests
         uses: matlab-actions/run-command@v3

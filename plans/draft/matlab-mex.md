@@ -14,6 +14,11 @@ API are retained, but the release must not claim an R2011a-tested artifact
 unless a standard GitHub-hosted runner can actually provision and execute that
 runtime.
 
+The R2023a Windows job installs the supported MinGW 8.1 toolchain directly on
+the disposable GitHub-hosted runner, verifies its pinned SHA-256, and exposes
+it to MATLAB through `MW_MINGW64_LOC`. This avoids any dependency on a
+machine-local compiler installation.
+
 ## Goal
 
 Build the MEX sources under `src/` on GitHub Actions or attached GitHub Actions runners for:
