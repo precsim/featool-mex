@@ -424,6 +424,26 @@ check_equal(coef, 2, 1e-12, 'assemble_se values');
 check_equal(rows, [1; 2], 0, 'assemble_s rows');
 check_equal(coef, [0; 0], 1e-12, 'assemble_s values');
 
+[rows, coef] = assemble_s(2, 'Linear_forces', [1 .25], [0; 0], ...
+    [], 1, 1, [1 0 0 1], 1, 1, [0 0]);
+check_equal(rows, zeros(0, 1), 0, 'assemble_s empty connectivity rows');
+check_equal(coef, zeros(0, 1), 0, 'assemble_s empty connectivity values');
+
+bad_connectivity = {0, 1.5, 2, double(intmax('int32')) + 1};
+for i = 1:length(bad_connectivity)
+    caught = false;
+    try
+        [rows, coef] = assemble_s(2, 'Linear_forces', [1 .25], [0; 0], ...
+            bad_connectivity{i}, 1, 1, [1 0 0 1], 1, 1, [0 0]); %#ok<ASGLU>
+    catch
+        caught = true;
+    end
+    if ~caught
+        error('SMOKE_MEX:Failure', ...
+            'assemble_s accepted invalid element connectivity.');
+    end
+end
+
 [arows, acols, acoef, rrows, rcoef, stress] = assemble_s(3, ...
     'NeoHookean_prestress', [1 .25], [0; 0; 0], 1, 1, 1, ...
     [1 0 0 0 1 0 0 0 1], 1, 1, [0 0 0], zeros(9, 1));
@@ -439,6 +459,33 @@ check_scalar(numel(stress), 9, 'assemble_s prestress stress');
 check_equal(rows, [1; 1; 2], 0, 'assemble_f rows');
 check_equal(cols, [1; 2; 1], 0, 'assemble_f columns');
 check_equal(coef, [2; -1; 1], 1e-12, 'assemble_f values');
+
+[rows, cols, coef] = assemble_f('convective_Oseen', 1, 1, 1, 1, 1, ...
+    1, 1, 1, 1, 1, 1);
+check_equal(rows, 1, 0, 'assemble_f convective rows');
+check_equal(cols, 1, 0, 'assemble_f convective columns');
+check_equal(coef, 1, 1e-12, 'assemble_f convective values');
+
+[rows, cols, coef] = assemble_f('convective_Oseen', 1, 1, [], 1, 1, ...
+    1, 1, 1, 1, 1, 1);
+check_equal(rows, zeros(0, 1), 0, 'assemble_f empty connectivity rows');
+check_equal(cols, zeros(0, 1), 0, 'assemble_f empty connectivity columns');
+check_equal(coef, zeros(0, 1), 0, 'assemble_f empty connectivity values');
+
+bad_connectivity = {0, 1.5, 2, double(intmax('int32')) + 1};
+for i = 1:length(bad_connectivity)
+    caught = false;
+    try
+        [rows, cols, coef] = assemble_f('convective_Oseen', 1, 1, ...
+            bad_connectivity{i}, 1, 1, 1, 1, 1, 1, 1, 1); %#ok<ASGLU>
+    catch
+        caught = true;
+    end
+    if ~caught
+        error('SMOKE_MEX:Failure', ...
+            'assemble_f accepted invalid element connectivity.');
+    end
+end
 
 fprintf(1, 'All MEX smoke tests passed.\n');
 end

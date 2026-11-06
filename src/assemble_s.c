@@ -148,6 +148,11 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     int noe = mexCheckedSizeToInt(mxGetN(prhs[4]), "element count");
     int NumQuadPoints = mexCheckedSizeToInt(mxGetN(prhs[6]), "quadrature point count");
     int nln2 = mexCheckedMulInt(nln, nln, "local matrix size");
+    int state_rows = mexCheckedSizeToInt(mxGetM(prhs[3]), "state vector row count");
+    int num_nodes = state_rows/dim;
+    mexRequireOneBasedDoubleIndexRows(prhs[4], (mwSize)nln,
+                                      (mwSize)num_nodes,
+                                      "Element connectivity");
 
     switch (model) {
     case MODEL_LINEAR_FORCES:

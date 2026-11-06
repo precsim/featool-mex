@@ -55,4 +55,35 @@ static int mexCheckedAddInt(int a, int b, const char *name)
     return a+b;
 }
 
+static void mexRequireOneBasedDoubleIndexRows(const mxArray *array,
+                                               mwSize rows,
+                                               mwSize upper_bound,
+                                               const char *name)
+{
+    if (!mxIsDouble(array) || mxIsComplex(array) || mxIsSparse(array))
+        mexErrMsgIdAndTxt("featool_mex:indexRange",
+                          "%s must be a real full double array.", name);
+
+    const mwSize m = mxGetM(array);
+    const mwSize n = mxGetN(array);
+    if (n == 0)
+        return;
+    if (rows > m)
+        mexErrMsgIdAndTxt("featool_mex:indexRange",
+                          "%s does not contain enough connectivity rows.", name);
+
+    const double *values = mxGetPr(array);
+    for (mwSize col = 0; col < n; ++col) {
+        for (mwSize row = 0; row < rows; ++row) {
+            const double value = values[col*m + row];
+            if (!isfinite(value) || value < 1.0 ||
+                value > (double)upper_bound || value != floor(value))
+                mexErrMsgIdAndTxt(
+                    "featool_mex:indexRange",
+                    "%s values must be finite one-based integers within the available degree-of-freedom range.",
+                    name);
+        }
+    }
+}
+
 #endif
