@@ -53,6 +53,9 @@ if ~exist(opt.outdir, 'dir')
     mkdir(opt.outdir);
 end
 
+flag_environment = configure_compiler_environment();
+environment_cleanup = onCleanup(@() restore_compiler_environment(flag_environment)); %#ok<NASGU>
+
 for i = 1:length(targets)
     target = targets(i);
     source_file = fullfile(opt.srcdir, target.source);
@@ -79,6 +82,9 @@ for i = 1:length(targets)
 
     for j = 1:length(target.defines)
         args{end + 1} = ['-D' target.defines{j}];
+    end
+    if strcmpi(target.language, 'c')
+        args{end + 1} = '-std=c99';
     end
     if opt.openmp && target.openmp
         args{end + 1} = '-fopenmp';
@@ -112,12 +118,57 @@ for i = 1:length(targets)
     target_names{i} = targets(i).name;
 end
 
+[compiler_description, linker_description] = octave_toolchain_description();
 info = make_build_info('octave', version(), mx, opt.openmp, ...
-    'mex-compat', target_names, octave_compiler_description());
+    'mex-compat', target_names, compiler_description, linker_description);
 if opt.metadata
     write_build_info(opt.outdir, info);
 end
 
+end
+
+
+function saved = configure_compiler_environment()
+names = {'CFLAGS', 'CXXFLAGS', 'LDFLAGS', 'DL_LDFLAGS', 'CPPFLAGS', ...
+         'XTRA_CFLAGS', 'XTRA_CXXFLAGS', 'LFLAGS'};
+saved = cell(length(names), 2);
+for i = 1:length(names)
+    name = names{i};
+    saved{i, 1} = name;
+    saved{i, 2} = getenv(name);
+
+    [status, value] = system(['mkoctfile -p ' name]);
+    if status ~= 0
+        continue
+    end
+    value = strtrim(value);
+    value = strip_openmp_flags(value);
+    if isempty(value)
+        % mkoctfile treats an empty environment value as "not overridden"
+        % and falls back to its compiled default. A single space is a
+        % deliberate no-flag override and prevents inherited OpenMP flags
+        % from reappearing.
+        setenv(name, ' ');
+    else
+        setenv(name, value);
+    end
+end
+end
+
+
+function restore_compiler_environment(saved)
+for i = 1:size(saved, 1)
+    setenv(saved{i, 1}, saved{i, 2});
+end
+end
+
+
+function value = strip_openmp_flags(value)
+value = regexprep(value, '(^|\s)-fopenmp(=[^\s]+)?(?=\s|$)', '$1');
+value = regexprep(value, '(^|\s)-Xpreprocessor\s+-fopenmp(?=\s|$)', '$1');
+value = regexprep(value, '(^|\s)-l(gomp|omp|iomp5)(?=\s|$)', '$1');
+value = regexprep(value, '\s+', ' ');
+value = strtrim(value);
 end
 
 
@@ -189,16 +240,51 @@ end
 end
 
 
-function description = octave_compiler_description()
-description = 'unknown';
+function [compiler_description, linker_description] = octave_toolchain_description()
+compiler_description = 'unknown';
+linker_description = 'unknown';
 try
     [status, cc] = system('mkoctfile -p CC');
     if status == 0
-        description = strtrim(cc);
+        cc = strtrim(cc);
+        compiler_description = ['CC=' cc];
+        cc_version = tool_version(cc);
+        if ~isempty(cc_version)
+            compiler_description = [compiler_description ' (' cc_version ')'];
+        end
     end
     [status, cxx] = system('mkoctfile -p CXX');
     if status == 0 && ~isempty(strtrim(cxx))
-        description = [description '; CXX=' strtrim(cxx)];
+        cxx = strtrim(cxx);
+        compiler_description = [compiler_description '; CXX=' cxx];
+        cxx_version = tool_version(cxx);
+        if ~isempty(cxx_version)
+            compiler_description = [compiler_description ' (' cxx_version ')'];
+        end
+    end
+    [status, linker] = system('mkoctfile -p CXXLD');
+    if status == 0 && ~isempty(strtrim(linker))
+        linker = strtrim(linker);
+        linker_description = linker;
+        linker_version = tool_version(linker);
+        if ~isempty(linker_version)
+            linker_description = [linker_description ' (' linker_version ')'];
+        end
+    end
+catch
+end
+end
+
+
+function value = tool_version(command)
+value = '';
+try
+    [status, output] = system([command ' --version']);
+    if status == 0
+        lines = regexp(strtrim(output), '\r?\n', 'split');
+        if ~isempty(lines)
+            value = strtrim(lines{1});
+        end
     end
 catch
 end

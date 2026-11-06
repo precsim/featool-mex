@@ -108,6 +108,24 @@ def main() -> int:
             metadata["binary_audit"] = json.loads(audit.read_text(encoding="utf-8"))
         else:
             metadata["binary_audit_report"] = audit.name
+            if args.platform.startswith("macos-"):
+                deployment_targets = sorted(
+                    {
+                        value.strip()
+                        for value in re.findall(
+                            r"^minimum_macos:\s*(\S+)\s*$",
+                            audit.read_text(encoding="utf-8"),
+                            flags=re.MULTILINE,
+                        )
+                        if value.strip() != "unknown"
+                    }
+                )
+                if len(deployment_targets) == 1:
+                    metadata["minimum_os"] = f"macOS {deployment_targets[0]}"
+                elif deployment_targets:
+                    metadata["minimum_os"] = [
+                        f"macOS {value}" for value in deployment_targets
+                    ]
 
     metadata_path.write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"

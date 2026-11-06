@@ -1,5 +1,4 @@
 #include "mex.h"
-#include "matrix.h"
 
 #ifdef _OPENMP
 #include <omp.h>

@@ -139,47 +139,110 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  octave-linux:
-    name: Octave Linux x86-64
+  octave:
+    name: Octave ${{ matrix.platform }}
     needs: manifest
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+            octave_cmd: octave
+            audit: linux
+            audit_file: linux-ABI.json
+          - runner: windows-2025
+            platform: windows-x86_64
+            octave_cmd: octave-cli
+            audit: windows
+            audit_file: windows-ABI.txt
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            octave_cmd: octave
+            audit: macos-x86_64
+            audit_file: macos-ABI.txt
+          - runner: macos-15
+            platform: macos-arm64
+            octave_cmd: octave
+            audit: macos-arm64
+            audit_file: macos-ABI.txt
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Octave development tools
+      - name: Install Octave on Linux
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends octave octave-dev
 
+      - name: Install Octave on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install octave --yes --no-progress
+
+      - name: Install Octave on macOS
+        if: runner.os == 'macOS'
+        run: brew install octave
+
+      - name: Show Octave version
+        run: ${{ matrix.octave_cmd }} --version
+
       - name: Build serial Octave MEX files and run smoke tests
         run: >-
-          octave --no-gui --quiet --eval
+          ${{ matrix.octave_cmd }} --no-gui --quiet --eval
           "addpath(fullfile(pwd,'test'));
-          outdir=fullfile(pwd,'dist','octave','linux-x86_64');
+          outdir=fullfile(pwd,'dist','octave','${{ matrix.platform }}');
           build_octave('outdir',outdir,'openmp',false);
           smoke_mex(outdir);"
 
       - name: Inspect Octave Linux ELF ABI
+        if: matrix.audit == 'linux'
         run: >-
           python3 ci/check_linux_abi.py
-          dist/octave/linux-x86_64
+          "dist/octave/${{ matrix.platform }}"
           --extensions mex
-          --output dist/octave/linux-x86_64/linux-ABI.json
+          --output "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Octave Windows PE ABI
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        run: >-
+          ./ci/check_windows_binary.ps1
+          -Directory "dist/octave/${{ matrix.platform }}"
+          -ReportFile "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          -AllowCompilerRuntime
+
+      - name: Inspect Octave Intel macOS Mach-O ABI
+        if: matrix.audit == 'macos-x86_64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/octave/${{ matrix.platform }}"
+          x86_64
+          "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Octave Apple silicon macOS Mach-O ABI
+        if: matrix.audit == 'macos-arm64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/octave/${{ matrix.platform }}"
+          arm64
+          "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
       - name: Finalize artifact metadata and checksums
         run: >-
-          python3 ci/finalize_artifact.py
-          dist/octave/linux-x86_64
+          python ci/finalize_artifact.py
+          "dist/octave/${{ matrix.platform }}"
           --extension mex
           --runtime octave
-          --platform linux-x86_64
-          --audit-file dist/octave/linux-x86_64/linux-ABI.json
+          --platform "${{ matrix.platform }}"
+          --audit-file "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
           --compatibility "modern Octave source build and same-runtime smoke test passed"
 
       - name: Upload Octave artifact
         uses: actions/upload-artifact@v7
         with:
-          name: octave-linux-x86_64-source-ci
-          path: dist/octave/linux-x86_64/
+          name: octave-${{ matrix.platform }}-source-ci
+          path: dist/octave/${{ matrix.platform }}/
           if-no-files-found: error
           retention-days: 14

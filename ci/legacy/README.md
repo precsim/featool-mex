@@ -52,6 +52,12 @@ macOS controllers need `bash`, `file`, `lipo`, and `otool`. These tools
 inspect the returned binaries on the controller rather than inside the preserved
 appliance.
 
+macOS compatibility controller services should set
+`MEX_MAX_MACOS_DEPLOYMENT_TARGET` to the newest deployment target allowed
+for that preserved build appliance. The Mach-O audit fails if any returned MEX
+binary requires a newer macOS target, and records the measured target in the
+artifact metadata.
+
 All C targets require C99. The appliance must configure C compilation with
 `-std=c99` (or an equivalent verified mode) in its explicit MEX options. The
 repository build driver also adds `-std=c99` automatically for GNU/Clang-like

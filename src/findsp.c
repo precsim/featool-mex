@@ -1,6 +1,5 @@
 #include "mex.h"
 #include <string.h>
-#include "matrix.h"
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   /* Get Matlab sparse matrix CSC format.

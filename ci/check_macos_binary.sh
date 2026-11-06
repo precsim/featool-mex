@@ -13,6 +13,7 @@ allow_openmp="false"
 if [[ $# -ge 4 ]]; then
   allow_openmp="$4"
 fi
+max_deployment_target="${MEX_MAX_MACOS_DEPLOYMENT_TARGET:-}"
 
 mkdir -p "$(dirname "$report_file")"
 : > "$report_file"
@@ -46,6 +47,23 @@ while IFS= read -r -d '' binary; do
       '
   )"
   echo "minimum_macos: ${deployment_target:-unknown}" >> "$report_file"
+  if [[ -n "$max_deployment_target" ]]; then
+    if [[ -z "$deployment_target" ]]; then
+      echo "$(basename "$binary"): could not determine macOS deployment target" >&2
+      failed=1
+    elif ! python3 - "$deployment_target" "$max_deployment_target" <<'PY'
+import sys
+
+def version(value):
+    return tuple(int(part) for part in value.split("."))
+
+raise SystemExit(0 if version(sys.argv[1]) <= version(sys.argv[2]) else 1)
+PY
+    then
+      echo "$(basename "$binary"): deployment target $deployment_target exceeds $max_deployment_target" >&2
+      failed=1
+    fi
+  fi
 
   if [[ "$allow_openmp" != "true" ]]; then
     deps="$(otool -L "$binary")"

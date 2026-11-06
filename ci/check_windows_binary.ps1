@@ -3,7 +3,8 @@ param(
     [string]$Directory,
     [Parameter(Mandatory = $true)]
     [string]$ReportFile,
-    [switch]$AllowOpenMP
+    [switch]$AllowOpenMP,
+    [switch]$AllowCompilerRuntime
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,6 +59,11 @@ foreach ($file in $files) {
 
     if (-not $AllowOpenMP -and $dependents -match "(?i)(vcomp|libgomp|libomp|libiomp)") {
         Write-Error "$($file.Name): unexpected OpenMP runtime dependency" -ErrorAction Continue
+        $failed = $true
+    }
+
+    if (-not $AllowCompilerRuntime -and $dependents -match "(?i)(libgcc|libstdc\+\+|libwinpthread)") {
+        Write-Error "$($file.Name): unexpected external MinGW runtime dependency" -ErrorAction Continue
         $failed = $true
     }
 }
