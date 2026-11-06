@@ -128,6 +128,8 @@ The exact source commit, compiler information, runtime used for the build, and A
 
 Version tags matching `v*` trigger `.github/workflows/mex-release.yml`. A successful tagged release performs the complete MATLAB and Octave build matrix, same-runtime smoke tests, ABI audits, fresh-runner downloaded-artifact tests, checksum verification, bundle assembly, and GitHub Release publication.
 
+After publication, `.github/workflows/release-consumer.yml` downloads each published ZIP and the release-level `SHA256SUMS` from the GitHub Release onto fresh GitHub-hosted runners, verifies both the release ZIP and extracted bundle checksums, and runs the smoke tests from the exact source commit recorded in each bundle without rebuilding. Automatic runs also require that recorded source commit to match the release workflow commit. The workflow can be dispatched manually for an existing release tag such as `v0.1.0`.
+
 The first hosted release is [`v0.1.0`](https://github.com/precsim/featool-mex/releases/tag/v0.1.0), built from commit `02f0d948e28b6f20f74cabada24f1b82b69a8dc1`.
 
 Normal pull requests use the hosted MEX CI workflow before changes are merged. No self-hosted build machine is required by the active build or release path.
