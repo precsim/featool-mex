@@ -47,6 +47,11 @@ uint32_t hashValue(const uint8_t *val,size_t nelems,size_t sizelem,
 bool valueEqual(const uint8_t *A,const uint8_t *B,size_t nelems,
                 size_t sizelem,mxClassID id);
 bool mx_IsEqual(const mxArray *A,const mxArray *B);
+static mxArray *createDataMatrix(size_t m,size_t n,mxClassID id);
+static uint32_t mxDataHash(const mxArray *A);
+static uint32_t mxShapeHash(const mxArray *A,uint32_t offset);
+static uint32_t mxShapeHash2nd(const mxArray *A);
+static mxArray *mxDuplicateCellValue(const mxArray *A);
 
 // Venn-topology routines
 void hashSort(hashTable *T,
@@ -101,7 +106,7 @@ void mxismemberOut(mxhashTable T,size_t Na,size_t Nb,
 void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
 {
   // fetch first argument op (read at most 9 characters)
-  char strop[10];
+  char strop[10] = {0};
   HASH_OP op;
 
   // determine the type of the set-operation
@@ -163,7 +168,8 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
       const mxClassID id = mxGetClassID(prhs[1]);
       const size_t nelems = Mbytes/sizelem;
       for (size_t i = 0; i < Na; i++)
-        C[i] = hashValue(&A[i*Mbytes],nelems,sizelem,id,0);
+        C[i] = hashValue(Mbytes ? &A[i*Mbytes] : NULL,
+                         nelems,sizelem,id,0);
       return;
     }
 
@@ -217,8 +223,9 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
     Na = mxGetNumberOfElements(A);
     for (size_t i = 0; i < Na; i++) {
       const mxArray *Ai = mxGetCell(A,i);
-      if (!(mxIsNumeric(Ai) || mxIsChar(Ai) || mxIsLogical(Ai)) ||
-          mxIsComplex(Ai) || mxIsSparse(Ai))
+      if (Ai != NULL &&
+          (!(mxIsNumeric(Ai) || mxIsChar(Ai) || mxIsLogical(Ai)) ||
+           mxIsComplex(Ai) || mxIsSparse(Ai)))
         mexErrMsgIdAndTxt("fsetop:e11","Cell-vector must contain real, "
                           "non-sparse arrays.");
     }
@@ -230,11 +237,8 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
       C = mxGetData(plhs[0]);
       for (size_t i = 0; i < Na; i++) {
         const mxArray *Ai = mxGetCell(A,i);
-        uint32_t hashkey = hashValue(mxGetData(Ai),mxGetNumberOfElements(Ai),
-                                     mxGetElementSize(Ai),mxGetClassID(Ai),
-                                     mxGetClassID(Ai));
-        hashkey = hash((uint8_t *)mxGetDimensions(Ai),
-                       mxGetNumberOfDimensions(Ai)*sizeof(mwSize),hashkey);
+        uint32_t hashkey = mxDataHash(Ai);
+        hashkey = mxShapeHash(Ai,hashkey);
         C[i] = hashkey;
       }
       return;
@@ -250,8 +254,9 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
       Nb = mxGetNumberOfElements(B);
       for (size_t i = 0; i < Nb; i++) {
         const mxArray *Bi = mxGetCell(B,i);
-        if (!(mxIsNumeric(Bi) || mxIsChar(Bi) || mxIsLogical(Bi)) ||
-            mxIsComplex(Bi) || mxIsSparse(Bi))
+        if (Bi != NULL &&
+            (!(mxIsNumeric(Bi) || mxIsChar(Bi) || mxIsLogical(Bi)) ||
+             mxIsComplex(Bi) || mxIsSparse(Bi)))
           mexErrMsgIdAndTxt("fsetop:e11","Cell-vector must contain real, "
                             "non-sparse arrays.");
       }
@@ -282,6 +287,21 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
   }
 }
 /*------------------------------------------------------------------------*/
+static mxArray *createDataMatrix(size_t m,size_t n,mxClassID id)
+/* Create a real 2-D array while using the supported constructor for class. */
+{
+  if (id == mxLOGICAL_CLASS)
+    return mxCreateLogicalMatrix(m,n);
+  else if (id == mxCHAR_CLASS) {
+    mwSize dims[2];
+    dims[0] = (mwSize)m;
+    dims[1] = (mwSize)n;
+    return mxCreateCharArray(2,dims);
+  }
+  else
+    return mxCreateNumericMatrix(m,n,id,mxREAL);
+}
+/*------------------------------------------------------------------------*/
 void intersectOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
                   int nlhs,mxArray *plhs[],
                   size_t siz,mxClassID id)
@@ -292,7 +312,7 @@ void intersectOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   double *ia = NULL,*ib = NULL;
 
   // allocate output
-  plhs[0] = mxCreateNumericMatrix(Mbytes/siz,T.nx,id,mxREAL);
+  plhs[0] = createDataMatrix(Mbytes/siz,T.nx,id);
   C = (uint8_t *)mxGetData(plhs[0]);
   if (nlhs > 1) {
     plhs[1] = mxCreateDoubleMatrix(1,T.nx,mxREAL);
@@ -306,10 +326,11 @@ void intersectOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   for (size_t i = 0,j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'X') {
-      memcpy(&C[j*Mbytes],T.hash_tb[hashkey],Mbytes);
+      if (Mbytes != 0)
+        memcpy(&C[j*Mbytes],T.hash_tb[hashkey],Mbytes);
       if (ia != NULL) {
         ia[j] = i+1;
-        if (ib != NULL)
+        if (ib != NULL && Mbytes != 0)
           // IB follows the order determined by IA
           T.hash_tb[hashkey] = &C[j*Mbytes];
       }
@@ -320,16 +341,22 @@ void intersectOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
     }
   }
 
-  if (ib != NULL)
-    for (size_t i = 0; i < Nb; i++) {
-      const uint32_t hashkey = T.hash_ixb[i];
-      if (T.hash_id[hashkey] == 'Y') {
-        ib[(T.hash_tb[hashkey]-&C[0])/(Mbytes ? Mbytes : 1)] = i+1;
-
-        // again, first unique element only
-        T.hash_id[hashkey] = 'Z';
-      }
+  if (ib != NULL) {
+    if (Mbytes == 0) {
+      if (T.nx != 0)
+        ib[0] = 1;
     }
+    else
+      for (size_t i = 0; i < Nb; i++) {
+        const uint32_t hashkey = T.hash_ixb[i];
+        if (T.hash_id[hashkey] == 'Y') {
+          ib[(T.hash_tb[hashkey]-&C[0])/Mbytes] = i+1;
+
+          // again, first unique element only
+          T.hash_id[hashkey] = 'Z';
+        }
+      }
+  }
 }
 /*------------------------------------------------------------------------*/
 void mxintersectOut(mxhashTable T,size_t Na,size_t Nb,
@@ -351,7 +378,7 @@ void mxintersectOut(mxhashTable T,size_t Na,size_t Nb,
   for (size_t i = 0,j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'X') {
-      mxSetCell(C,j,mxDuplicateArray(T.hash_tb[hashkey]));
+      mxSetCell(C,j,mxDuplicateCellValue(T.hash_tb[hashkey]));
       if (ia != NULL) {
         ia[j] = i+1;
         if (ib != NULL)
@@ -374,7 +401,7 @@ void setdiffOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   double *ia = NULL;
 
   // allocate output
-  plhs[0] = mxCreateNumericMatrix(Mbytes/siz,T.na,id,mxREAL);
+  plhs[0] = createDataMatrix(Mbytes/siz,T.na,id);
   C = (uint8_t *)mxGetData(plhs[0]);
   if (nlhs > 1) {
     plhs[1] = mxCreateDoubleMatrix(1,T.na,mxREAL);
@@ -384,7 +411,8 @@ void setdiffOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   for (size_t i = 0,j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'A') {
-      memcpy(&C[j*Mbytes],T.hash_tb[hashkey],Mbytes);
+      if (Mbytes != 0)
+        memcpy(&C[j*Mbytes],T.hash_tb[hashkey],Mbytes);
       if (ia != NULL) ia[j] = i+1;
 
       // first unique element only
@@ -409,7 +437,7 @@ void mxsetdiffOut(mxhashTable T,size_t Na,size_t Nb,
   for (size_t i = 0,j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'A') {
-      mxSetCell(C,j,mxDuplicateArray(T.hash_tb[hashkey]));
+      mxSetCell(C,j,mxDuplicateCellValue(T.hash_tb[hashkey]));
       if (ia != NULL) ia[j] = i+1;
 
       T.hash_id[hashkey] = 'Y';
@@ -428,7 +456,7 @@ void setxorOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   double *ia = NULL,*ib = NULL;
 
   // allocate output
-  plhs[0] = mxCreateNumericMatrix(Mbytes/siz,T.na+T.nb,id,mxREAL);
+  plhs[0] = createDataMatrix(Mbytes/siz,T.na+T.nb,id);
   C = (uint8_t *)mxGetData(plhs[0]);
   if (nlhs > 1) {
     plhs[1] = mxCreateDoubleMatrix(1,T.na,mxREAL);
@@ -443,7 +471,9 @@ void setxorOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   for (size_t i = 0,j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'A') {
-      memcpy(&C[k++*Mbytes],T.hash_tb[hashkey],Mbytes);
+      if (Mbytes != 0)
+        memcpy(&C[k*Mbytes],T.hash_tb[hashkey],Mbytes);
+      k++;
       if (ia != NULL) ia[j++] = i+1;
 
       // first unique element only
@@ -454,7 +484,9 @@ void setxorOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   for (size_t i = 0, j = 0; i < Nb; i++) {
     const uint32_t hashkey = T.hash_ixb[i];
     if (T.hash_id[hashkey] == 'B') {
-      memcpy(&C[k++*Mbytes],T.hash_tb[hashkey],Mbytes);
+      if (Mbytes != 0)
+        memcpy(&C[k*Mbytes],T.hash_tb[hashkey],Mbytes);
+      k++;
       if (ib != NULL) ib[j++] = i+1;
 
       T.hash_id[hashkey] = 'Y';
@@ -482,7 +514,7 @@ void mxsetxorOut(mxhashTable T,size_t Na,size_t Nb,
   for (size_t i = 0,j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'A') {
-      mxSetCell(C,k++,mxDuplicateArray(T.hash_tb[hashkey]));
+      mxSetCell(C,k++,mxDuplicateCellValue(T.hash_tb[hashkey]));
       if (ia != NULL) ia[j++] = i+1;
 
       T.hash_id[hashkey] = 'Y';
@@ -492,7 +524,7 @@ void mxsetxorOut(mxhashTable T,size_t Na,size_t Nb,
   for (size_t i = 0, j = 0; i < Nb; i++) {
     const uint32_t hashkey = T.hash_ixb[i];
     if (T.hash_id[hashkey] == 'B') {
-      mxSetCell(C,k++,mxDuplicateArray(T.hash_tb[hashkey]));
+      mxSetCell(C,k++,mxDuplicateCellValue(T.hash_tb[hashkey]));
       if (ib != NULL) ib[j++] = i+1;
 
       T.hash_id[hashkey] = 'Y';
@@ -510,7 +542,7 @@ void unionOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   uint8_t *C;
   double *ia = NULL,*ib = NULL,*ja = NULL,*jb = NULL;
 
-  plhs[0] = mxCreateNumericMatrix(Mbytes/siz,T.na+T.nx+T.nb,id,mxREAL);
+  plhs[0] = createDataMatrix(Mbytes/siz,T.na+T.nx+T.nb,id);
   C = (uint8_t *)mxGetData(plhs[0]);
   if (nlhs > 1) {
     plhs[1] = mxCreateDoubleMatrix(1,T.na+T.nx,mxREAL);
@@ -533,12 +565,14 @@ void unionOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   for (size_t i = 0, j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'A' || T.hash_id[hashkey] == 'X') {
-      memcpy(&C[k*Mbytes],T.hash_tb[hashkey],Mbytes);
+      if (Mbytes != 0)
+        memcpy(&C[k*Mbytes],T.hash_tb[hashkey],Mbytes);
       if (ia != NULL) {
         ia[j++] = i+1;
         if (ja != NULL) {
           ja[i] = k+1;
-          T.hash_tb[hashkey] = &C[k*Mbytes];
+          if (Mbytes != 0)
+            T.hash_tb[hashkey] = &C[k*Mbytes];
         }
       }
       k++;
@@ -547,18 +581,20 @@ void unionOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
       T.hash_id[hashkey] = 'Y';
     }
     else if (ja != NULL && T.hash_id[hashkey] == 'Y')
-      ja[i] = (T.hash_tb[hashkey]-&C[0])/(Mbytes ? Mbytes : 1)+1;
+      ja[i] = Mbytes ? (T.hash_tb[hashkey]-&C[0])/Mbytes+1 : 1;
   }
 
   for (size_t i = 0, j = 0; i < Nb; i++) {
     const uint32_t hashkey = T.hash_ixb[i];
     if (T.hash_id[hashkey] == 'B') {
-      memcpy(&C[k*Mbytes],T.hash_tb[hashkey],Mbytes);
+      if (Mbytes != 0)
+        memcpy(&C[k*Mbytes],T.hash_tb[hashkey],Mbytes);
       if (ib != NULL) {
         ib[j++] = i+1;
         if (jb != NULL) {
           jb[i] = k+1;
-          T.hash_tb[hashkey] = &C[k*Mbytes];
+          if (Mbytes != 0)
+            T.hash_tb[hashkey] = &C[k*Mbytes];
         }
       }
       k++;
@@ -566,7 +602,7 @@ void unionOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
       T.hash_id[hashkey] = 'Y';
     }
     else if (jb != NULL && T.hash_id[hashkey] == 'Y')
-      jb[i] = (T.hash_tb[hashkey]-&C[0])/(Mbytes ? Mbytes : 1)+1;
+      jb[i] = Mbytes ? (T.hash_tb[hashkey]-&C[0])/Mbytes+1 : 1;
   }
 }
 /*------------------------------------------------------------------------*/
@@ -598,7 +634,7 @@ void mxunionOut(mxhashTable T,size_t Na,size_t Nb,
   for (size_t i = 0, j = 0; i < Na; i++) {
     const uint32_t hashkey = T.hash_ixa[i];
     if (T.hash_id[hashkey] == 'A' || T.hash_id[hashkey] == 'X') {
-      mxSetCell(C,k,mxDuplicateArray(T.hash_tb[hashkey]));
+      mxSetCell(C,k,mxDuplicateCellValue(T.hash_tb[hashkey]));
       if (ia != NULL) {
         ia[j++] = i+1;
         if (ja != NULL) {
@@ -617,7 +653,7 @@ void mxunionOut(mxhashTable T,size_t Na,size_t Nb,
   for (size_t i = 0, j = 0; i < Nb; i++) {
     const uint32_t hashkey = T.hash_ixb[i];
     if (T.hash_id[hashkey] == 'B') {
-      mxSetCell(C,k,mxDuplicateArray(T.hash_tb[hashkey]));
+      mxSetCell(C,k,mxDuplicateCellValue(T.hash_tb[hashkey]));
       if (ib != NULL) {
         ib[j++] = i+1;
         if (jb != NULL) {
@@ -647,7 +683,7 @@ void uniqueOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
   uint8_t *B;
   double *ia = NULL,*ib = NULL;
 
-  plhs[0] = mxCreateNumericMatrix(Mbytes/siz,T.na,id,mxREAL);
+  plhs[0] = createDataMatrix(Mbytes/siz,T.na,id);
   B = (uint8_t *)mxGetData(plhs[0]);
   if (nlhs > 1) {
     plhs[1] = mxCreateDoubleMatrix(1,T.na,mxREAL);
@@ -662,10 +698,11 @@ void uniqueOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
     const uint32_t hashkey = T.hash_ixa[i];
 
     if (T.hash_id[hashkey] == 'A') {
-      memcpy(&B[j*Mbytes],T.hash_tb[hashkey],Mbytes);
+      if (Mbytes != 0)
+        memcpy(&B[j*Mbytes],T.hash_tb[hashkey],Mbytes);
       if (ia != NULL) {
         ia[j] = i+1;
-        if (ib != NULL)
+        if (ib != NULL && Mbytes != 0)
           // because IB points into B
           T.hash_tb[hashkey] = &B[j*Mbytes];
       }
@@ -676,8 +713,8 @@ void uniqueOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
     }
 
     // IB does not refer to unique elements
-    if (ib != NULL) ib[i] = ((T.hash_tb[hashkey]-&B[0]))/
-                      (Mbytes ? Mbytes : 1)+1;
+    if (ib != NULL)
+      ib[i] = Mbytes ? (T.hash_tb[hashkey]-&B[0])/Mbytes+1 : 1;
   }
 }
 /*------------------------------------------------------------------------*/
@@ -701,7 +738,7 @@ void mxuniqueOut(mxhashTable T,size_t Na,size_t Nb,
     const uint32_t hashkey = T.hash_ixa[i];
 
     if (T.hash_id[hashkey] == 'A') {
-      mxSetCell(B,j,mxDuplicateArray(T.hash_tb[hashkey]));
+      mxSetCell(B,j,mxDuplicateCellValue(T.hash_tb[hashkey]));
       if (ia != NULL) {
         ia[j] = i+1;
         if (ib != NULL)
@@ -742,8 +779,8 @@ void ismemberOut(hashTable T,size_t Na,size_t Nb,size_t Mbytes,
       ia[j] = 1;
 
       if (ib != NULL)
-        ib[j] = (T.hash_tb[hashkey]-T.hash_tb[T.hash_ixa[0]])/
-          (Mbytes ? Mbytes : 1)+1;
+        ib[j] = Mbytes ?
+          (T.hash_tb[hashkey]-T.hash_tb[T.hash_ixa[0]])/Mbytes+1 : 1;
     }
   }
 }
@@ -806,8 +843,13 @@ size_t hashsize(size_t len)
 }
 /*------------------------------------------------------------------------*/
 
-// should work on most platforms
-#define get16bits(d) (*((const uint16_t *)(d)))
+static uint16_t get16bits(const uint8_t *d)
+/* Read an unaligned native-endian 16-bit word without aliasing violations. */
+{
+  uint16_t value;
+  memcpy(&value,d,sizeof(value));
+  return value;
+}
 
 uint32_t hash(const uint8_t *val,size_t nbytes,uint32_t offset)
 /* Computes a hashkey from bytes. The input offset may be used to
@@ -871,6 +913,9 @@ uint32_t hashValue(const uint8_t *val,size_t nelems,size_t sizelem,
                    mxClassID id,uint32_t offset)
 /* Hash data while canonicalizing the sign bit of floating-point zero. */
 {
+  if (nelems == 0)
+    return hash((const uint8_t *)"",0,offset);
+
   if (id == mxDOUBLE_CLASS && sizelem == sizeof(double)) {
     const double *data = (const double *)val;
     bool has_negative_zero = false;
@@ -917,6 +962,9 @@ bool valueEqual(const uint8_t *A,const uint8_t *B,size_t nelems,
                 size_t sizelem,mxClassID id)
 /* Bitwise equality except that +0 and -0 are the same floating value. */
 {
+  if (nelems == 0)
+    return true;
+
   if (id == mxDOUBLE_CLASS && sizelem == sizeof(double)) {
     const double *a = (const double *)A,*b = (const double *)B;
     for (size_t i = 0; i < nelems; i++)
@@ -935,11 +983,70 @@ bool valueEqual(const uint8_t *A,const uint8_t *B,size_t nelems,
   return memcmp(A,B,nelems*sizelem) == 0;
 }
 /*------------------------------------------------------------------------*/
+static uint32_t mxDataHash(const mxArray *A)
+/* Hash cell contents; an unpopulated cell is MATLAB's empty double []. */
+{
+  if (A == NULL)
+    return hashValue(NULL,0,sizeof(double),mxDOUBLE_CLASS,mxDOUBLE_CLASS);
+
+  return hashValue(mxGetData(A),mxGetNumberOfElements(A),
+                   mxGetElementSize(A),mxGetClassID(A),mxGetClassID(A));
+}
+/*------------------------------------------------------------------------*/
+static uint32_t mxShapeHash(const mxArray *A,uint32_t offset)
+/* Add cell shape to an existing hash, normalizing an unpopulated cell to []. */
+{
+  static const mwSize empty_dims[2] = {0,0};
+
+  if (A == NULL)
+    return hash((const uint8_t *)empty_dims,sizeof(empty_dims),offset);
+
+  return hash((const uint8_t *)mxGetDimensions(A),
+              mxGetNumberOfDimensions(A)*sizeof(mwSize),offset);
+}
+/*------------------------------------------------------------------------*/
+static uint32_t mxShapeHash2nd(const mxArray *A)
+/* Secondary shape hash, with the same [] normalization as mxShapeHash. */
+{
+  static const mwSize empty_dims[2] = {0,0};
+
+  if (A == NULL)
+    return hash2nd((const uint8_t *)empty_dims,sizeof(empty_dims));
+
+  return hash2nd((const uint8_t *)mxGetDimensions(A),
+                 mxGetNumberOfDimensions(A)*sizeof(mwSize));
+}
+/*------------------------------------------------------------------------*/
+static mxArray *mxDuplicateCellValue(const mxArray *A)
+/* Materialize an unpopulated cell as [] when it is copied to an output. */
+{
+  if (A == NULL)
+    return mxCreateDoubleMatrix(0,0,mxREAL);
+
+  return mxDuplicateArray(A);
+}
+/*------------------------------------------------------------------------*/
 bool mx_IsEqual(const mxArray *A,const mxArray *B)
 /* Bitwise equality for real non-sparse mxArrays containing data. This
    function will not work properly for sparse arrays, cell-arrays,
    struct-arrays or for arrays containing imaginary data. */
 {
+  // MATLAB treats an unpopulated cell as the empty double matrix [].
+  if (A == NULL || B == NULL) {
+    const mxArray *other = (A != NULL) ? A : B;
+    const mwSize *dims;
+
+    if (other == NULL)
+      return true;
+    if (mxGetClassID(other) != mxDOUBLE_CLASS ||
+        mxGetNumberOfElements(other) != 0 ||
+        mxGetNumberOfDimensions(other) != 2)
+      return false;
+
+    dims = mxGetDimensions(other);
+    return dims[0] == 0 && dims[1] == 0;
+  }
+
   // class
   if (mxGetClassID(A) != mxGetClassID(B)) return false;
 
@@ -987,6 +1094,34 @@ void hashSort(hashTable *T,
 
   // clear counters
   T->na = T->nb = T->nx = 0;
+
+  // Every column of a zero-row matrix is the same empty column. Handle this
+  // topology directly so no pointer is formed from MATLAB's NULL data pointer.
+  if (Mbytes == 0) {
+    if (Na != 0) {
+      T->hash_tb[0] = NULL;
+      T->hash_id[0] = 'A';
+      T->na = 1;
+      for (size_t i = 0; i < Na; i++)
+        T->hash_ixa[i] = 0;
+    }
+
+    if (Nb != 0) {
+      T->hash_tb[0] = NULL;
+      for (size_t i = 0; i < Nb; i++)
+        T->hash_ixb[i] = 0;
+      if (Na != 0) {
+        T->hash_id[0] = 'X';
+        T->na = 0;
+        T->nx = 1;
+      }
+      else {
+        T->hash_id[0] = 'B';
+        T->nb = 1;
+      }
+    }
+    return;
+  }
 
   // hash columns of A
   for (size_t i = 0; i < Na; i++) {
@@ -1072,18 +1207,13 @@ void mxhashSort(mxhashTable *T,
   for (size_t i = 0; i < Na; i++) {
     // hashing over data and class only...
     const mxArray *Ai = mxGetCell(A,i);
-    uint32_t hashkey = hashValue(mxGetData(Ai),mxGetNumberOfElements(Ai),
-                                 mxGetElementSize(Ai),mxGetClassID(Ai),
-                                 mxGetClassID(Ai));
+    uint32_t hashkey = mxDataHash(Ai);
     hashkey = hashkey&(T->hashsz-1);
 
     if (T->hash_id[hashkey] != '\0' &&
         !mx_IsEqual(Ai,T->hash_tb[hashkey])) {
       // ...hashing over the shape is used as the secondary key
-      const uint32_t hashkey2nd = hash2nd((const uint8_t *)
-                                          mxGetDimensions(Ai),
-                                          mxGetNumberOfDimensions(Ai)*
-                                          sizeof(mwSize));
+      const uint32_t hashkey2nd = mxShapeHash2nd(Ai);
 
       do
         hashkey = (hashkey+hashkey2nd)&(T->hashsz-1);
@@ -1104,17 +1234,12 @@ void mxhashSort(mxhashTable *T,
 
   for (size_t i = 0; i < Nb; i++) {
     const mxArray *Bi = mxGetCell(B,i);
-    uint32_t hashkey = hashValue(mxGetData(Bi),mxGetNumberOfElements(Bi),
-                                 mxGetElementSize(Bi),mxGetClassID(Bi),
-                                 mxGetClassID(Bi));
+    uint32_t hashkey = mxDataHash(Bi);
     hashkey = hashkey&(T->hashsz-1);
 
     if (T->hash_id[hashkey] != '\0' &&
         !mx_IsEqual(Bi,T->hash_tb[hashkey])) {
-      const uint32_t hashkey2nd = hash2nd((const uint8_t *)
-                                          mxGetDimensions(Bi),
-                                          mxGetNumberOfDimensions(Bi)*
-                                          sizeof(mwSize));
+      const uint32_t hashkey2nd = mxShapeHash2nd(Bi);
 
       do
         hashkey = (hashkey+hashkey2nd)&(T->hashsz-1);

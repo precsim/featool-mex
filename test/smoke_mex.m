@@ -181,10 +181,20 @@ end
 
 A = sparse([1 3], [1 2], [4 5], 3, 2);
 [jc, ir, ind, vals] = findsp(A);
+if ~isa(jc, 'uint64') || ~isa(ir, 'uint64') || ~isa(ind, 'uint64')
+    error('SMOKE_MEX:Failure', 'findsp index outputs are not uint64.');
+end
 check_equal(double(jc), [0 1 2], 0, 'findsp column pointers');
 check_equal(double(ir), [0 2], 0, 'findsp row indices');
 check_equal(double(ind), [0 5], 0, 'findsp linear indices');
 check_equal(vals, [4 5], 0, 'findsp values');
+
+A_empty = sparse(3, 2);
+[jc_empty, ir_empty, ind_empty, vals_empty] = findsp(A_empty);
+check_equal(double(jc_empty), [0 0 0], 0, 'findsp empty column pointers');
+check_equal(double(ir_empty), zeros(1, 0), 0, 'findsp empty row indices');
+check_equal(double(ind_empty), zeros(1, 0), 0, 'findsp empty linear indices');
+check_equal(vals_empty, zeros(1, 0), 0, 'findsp empty values');
 
 caught = false;
 try
@@ -194,6 +204,16 @@ catch
 end
 if ~caught
     error('SMOKE_MEX:Failure', 'findsp accepted complex sparse input.');
+end
+
+caught = false;
+try
+    [o1, o2, o3, o4, o5] = findsp(A); %#ok<ASGLU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'findsp accepted more than four outputs.');
 end
 
 unique_values = fsetop('unique', [3 1 3 2]);
@@ -208,6 +228,46 @@ cell_values = fsetop('unique', {0, -0});
 if numel(cell_values) ~= 1 || cell_values{1} ~= 0
     error('SMOKE_MEX:Failure', 'fsetop cell equality distinguishes signed zero.');
 end
+
+single_values = fsetop('unique', single([0 -0]));
+if ~isa(single_values, 'single') || numel(single_values) ~= 1 || single_values(1) ~= 0
+    error('SMOKE_MEX:Failure', 'fsetop single signed-zero handling failed.');
+end
+
+char_values = fsetop('unique', 'abca');
+if ~ischar(char_values)
+    error('SMOKE_MEX:Failure', 'fsetop did not preserve char class.');
+end
+check_equal(char_values, 'abc', 0, 'fsetop char unique');
+
+logical_values = fsetop('unique', logical([1 0 1]));
+if ~islogical(logical_values)
+    error('SMOKE_MEX:Failure', 'fsetop did not preserve logical class.');
+end
+check_equal(logical_values, logical([1 0]), 0, 'fsetop logical unique');
+
+empty_cells = cell(1, 2);
+empty_cells{2} = [];
+cell_values = fsetop('unique', empty_cells);
+if numel(cell_values) ~= 1 || ~isempty(cell_values{1}) || ...
+        ~isa(cell_values{1}, 'double')
+    error('SMOKE_MEX:Failure', 'fsetop did not normalize unpopulated cells to [].');
+end
+cell_hashes = fsetop('check', empty_cells);
+check_equal(cell_hashes, repmat(cell_hashes(1), 1, 2), 0, ...
+    'fsetop unpopulated-cell check');
+
+[empty_unique, empty_ia, empty_ib] = fsetop('unique', zeros(0, 3));
+check_equal(empty_unique, zeros(0, 1), 0, 'fsetop zero-row unique');
+check_equal(empty_ia, 1, 0, 'fsetop zero-row unique IA');
+check_equal(empty_ib, [1 1 1], 0, 'fsetop zero-row unique IB');
+empty_hashes = fsetop('check', zeros(0, 3));
+check_equal(empty_hashes, repmat(empty_hashes(1), 1, 3), 0, ...
+    'fsetop zero-row check');
+
+[empty_member, empty_loc] = fsetop('ismember', zeros(0, 2), zeros(0, 3));
+check_equal(empty_member, logical([1 1]), 0, 'fsetop zero-row ismember');
+check_equal(empty_loc, [1 1], 0, 'fsetop zero-row ismember locations');
 
 membership = fsetop('ismember', [-0 1], [0 2]);
 check_equal(membership, [1 0], 0, 'fsetop signed zero ismember');
@@ -253,6 +313,26 @@ catch
 end
 if ~caught
     error('SMOKE_MEX:Failure', 'fsparse accepted an index above INT_MAX.');
+end
+
+caught = false;
+try
+    S = fsparse(double(intmax('int32')), 1, 1); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'fsparse accepted the unsafe INT_MAX index boundary.');
+end
+
+caught = false;
+try
+    S = fsparse(1, 1, 1, [1 1], 'sort', double(intmax('int32'))); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'fsparse accepted the unsafe INT_MAX thread count.');
 end
 
 S = sparse([2 -1; -1 2]);
