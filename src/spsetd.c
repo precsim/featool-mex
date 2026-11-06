@@ -1,5 +1,6 @@
 #include "mex.h"
 #include <stddef.h>
+#include <stdlib.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -8,7 +9,7 @@
 #if defined(__GNUC__)
 #define restrict __restrict__
 #elif defined(__INTEL_COMPILER)
-#define restrict restrict
+#define restrict __restrict
 #elif defined(_MSC_VER)
 #define restrict __restrict
 #endif
@@ -21,12 +22,36 @@
     if not all diagonal entries I are found in A.
 
     To compile with visual studio:
-    1. mex eindarr.c COMPFLAGS="$COMPFLAGS /openmp /MT"
+    1. mex spsetd.c COMPFLAGS="$COMPFLAGS /openmp /MT"
     2. include vcomp140.dll with redistribution
 
     J.S. Hysing 2207010.
     Copyright 2013-2022 Precise Simulation, Ltd.
 */
+
+int compare_mwindex(const void *a, const void *b) {
+  const mwIndex ia = *(const mwIndex *)a;
+  const mwIndex ib = *(const mwIndex *)b;
+  return (ia > ib) - (ia < ib);
+}
+
+int find_selected_row(const mwIndex *restrict rows, const mwSize nrows,
+                      const mwIndex target, mwSize *position) {
+  mwSize lo = 0;
+  mwSize hi = nrows;
+  while (lo < hi) {
+    const mwSize mid = lo + (hi - lo)/2;
+    if (rows[mid] < target)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  if (lo < nrows && rows[lo] == target) {
+    *position = lo;
+    return 1;
+  }
+  return 0;
+}
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
@@ -51,44 +76,46 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   const mwSize ncols = mxGetN(a);
   double *restrict pa = mxGetPr(a);
 
-  /* Row pointers */
-  mwIndex i, ii;
-  int nerr = 0;
+  /* Selected rows. Keep storage proportional to the selection, not nrows. */
   const double *restrict rp = (double *)mxGetData(prhs[1]);
   const mwSize nrp = mxGetNumberOfElements(prhs[1]);
-  int8_T* indrows = mxCalloc(nrows, sizeof(int8_T));
-  int8_T* founddiag = mxCalloc(nrows, sizeof(int8_T));
-  for (ii = 0; ii < nrp; ++ii) {
-    const double row = rp[ii];
+  if (nrp == 0)
+    return;
+
+  mwIndex *restrict rows = mxCalloc(nrp, sizeof(mwIndex));
+  mwSize k;
+  for (k = 0; k < nrp; ++k) {
+    const double row = rp[k];
     if (row >= 1.0 && row <= (double)nrows &&
         row == (double)(mwIndex)row) {
-      i = (mwIndex)row - 1;
-      indrows[i] = 1;
+      rows[k] = (mwIndex)row - 1;
     } else {
-      nerr += 1;
-      break;
+      mxFree(rows);
+      mexErrMsgTxt("Row indices out of bounds.");
     }
   }
 
-  if (nerr > 0) {
-    mxFree(founddiag);
-    mxFree(indrows);
-    mexErrMsgTxt("Row indices out of bounds.");
+  qsort(rows, nrp, sizeof(mwIndex), compare_mwindex);
+  mwSize nsel = 1;
+  for (k = 1; k < nrp; ++k) {
+    if (rows[k] != rows[nsel-1])
+      rows[nsel++] = rows[k];
   }
+  int8_T *restrict founddiag = mxCalloc(nsel, sizeof(int8_T));
 
   /* Null rows and set diagonal entry */
   ptrdiff_t col;
-#pragma omp parallel for private(i,ii)
+#pragma omp parallel for
   for (col = 0; col < (ptrdiff_t)ncols; ++col) {   // column
     const mwIndex j = (mwIndex)col;
-    /* printf("j = %d, jca[j] = %d\n", j, jca[j]); */
+    mwIndex ii;
     for (ii = jca[j]; ii < jca[j+1]; ++ii) {
-      i = ira[ii];   // row
-      /* printf("ii = %d, i = %d %d\n", ii, i, indrows[i]); */
-      if (indrows[i]) {
+      const mwIndex i = ira[ii];   // row
+      mwSize selected_pos;
+      if (find_selected_row(rows, nsel, i, &selected_pos)) {
         if (i == j) {
           pa[ii] = 1.;
-          founddiag[i] = 1;
+          founddiag[selected_pos] = 1;
         } else {
           pa[ii] = 0.;
         }
@@ -96,20 +123,15 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     }
   }
 
-  ptrdiff_t row;
-#pragma omp parallel for reduction(+:nerr)
-  for (row = 0; row < (ptrdiff_t)nrows; ++row) {
-    if (indrows[row] && !founddiag[row]) {
-      nerr += 1;
-#ifndef _OPENMP
-      break;
-#endif
+  for (k = 0; k < nsel; ++k) {
+    if (!founddiag[k]) {
+      mxFree(founddiag);
+      mxFree(rows);
+      mexErrMsgTxt("Requested row does not contain a diagonal entry.");
     }
   }
 
   mxFree(founddiag);
-  mxFree(indrows);
-  if (nerr > 0)
-    mexErrMsgTxt("Requested row does not contain a diagonal entry.");
+  mxFree(rows);
 
 }
