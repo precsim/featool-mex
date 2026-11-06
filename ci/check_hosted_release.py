@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject self-hosted/controller dependencies in the MEX release workflow."""
+"""Reject self-hosted/controller dependencies in MEX release workflows."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "mex-release.yml"
+WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "mex-release.yml",
+    ROOT / ".github" / "workflows" / "release-consumer.yml",
+)
 FORBIDDEN = (
     "self-hosted",
     "mex-controller",
@@ -27,32 +30,33 @@ RUNNER_VALUE_RE = re.compile(r"^\s*(?:runner|runs-on):\s*([^#]+?)\s*$")
 
 
 def main() -> int:
-    text = WORKFLOW.read_text(encoding="utf-8")
-    violations = [token for token in FORBIDDEN if token in text]
-    if violations:
-        raise SystemExit(
-            "mex-release.yml must use GitHub-hosted runners only; found: "
-            + ", ".join(violations)
-        )
+    for workflow in WORKFLOWS:
+        text = workflow.read_text(encoding="utf-8")
+        violations = [token for token in FORBIDDEN if token in text]
+        if violations:
+            raise SystemExit(
+                f"{workflow.name} must use GitHub-hosted runners only; found: "
+                + ", ".join(violations)
+            )
 
-    unexpected_runners = set()
-    for line in text.splitlines():
-        match = RUNNER_VALUE_RE.match(line)
-        if not match:
-            continue
-        value = match.group(1).strip().strip("'\"")
-        if value == "${{ matrix.runner }}":
-            continue
-        if value not in ALLOWED_RUNNERS:
-            unexpected_runners.add(value)
+        unexpected_runners = set()
+        for line in text.splitlines():
+            match = RUNNER_VALUE_RE.match(line)
+            if not match:
+                continue
+            value = match.group(1).strip().strip("'\"")
+            if value == "${{ matrix.runner }}":
+                continue
+            if value not in ALLOWED_RUNNERS:
+                unexpected_runners.add(value)
 
-    if unexpected_runners:
-        raise SystemExit(
-            "mex-release.yml contains an unapproved runner label: "
-            + ", ".join(sorted(unexpected_runners))
-        )
+        if unexpected_runners:
+            raise SystemExit(
+                f"{workflow.name} contains an unapproved runner label: "
+                + ", ".join(sorted(unexpected_runners))
+            )
 
-    print("MEX release workflow is GitHub-hosted-only.")
+    print("MEX release workflows are GitHub-hosted-only.")
     return 0
 
 

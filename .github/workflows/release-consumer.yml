@@ -1,0 +1,168 @@
+name: Published release consumer validation
+
+on:
+  workflow_run:
+    workflows:
+      - MEX hosted release
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to validate
+        required: true
+        default: v0.1.0
+
+permissions:
+  contents: read
+
+jobs:
+  consumer-validation:
+    name: ${{ matrix.runtime }} published asset ${{ matrix.platform }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v'))
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            runtime: matlab
+            platform: linux-x86_64
+            matlab_release: R2026b
+          - runner: windows-2025
+            runtime: matlab
+            platform: windows-x86_64
+            matlab_release: R2026b
+          - runner: macos-15-intel
+            runtime: matlab
+            platform: macos-x86_64
+            matlab_release: R2025b
+          - runner: macos-15
+            runtime: matlab
+            platform: macos-arm64
+            matlab_release: R2026b
+          - runner: ubuntu-24.04
+            runtime: octave
+            platform: linux-x86_64
+            octave_cmd: octave
+          - runner: windows-2025
+            runtime: octave
+            platform: windows-x86_64
+            octave_cmd: octave-cli
+          - runner: macos-15-intel
+            runtime: octave
+            platform: macos-x86_64
+            octave_cmd: octave
+          - runner: macos-15
+            runtime: octave
+            platform: macos-arm64
+            octave_cmd: octave
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_TAG: >-
+        ${{ github.event_name == 'workflow_dispatch' &&
+        inputs.tag || github.event.workflow_run.head_branch }}
+      ASSET_NAME: ${{ matrix.runtime }}-${{ matrix.platform }}.zip
+      BUNDLE_DIR: ${{ matrix.runtime }}-${{ matrix.platform }}
+    steps:
+      - name: Check out the consumer validation harness
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Check out the released source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          path: released-source
+
+      - name: Create release download directory
+        run: >-
+          python -c "from pathlib import Path;
+          Path('release-download').mkdir(exist_ok=True)"
+
+      - name: Download published GitHub Release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release download "${{ env.RELEASE_TAG }}"
+          --repo "${{ github.repository }}"
+          --pattern "${{ env.ASSET_NAME }}"
+          --pattern "SHA256SUMS"
+          --dir release-download
+
+      - name: Verify published ZIP checksum
+        run: >-
+          python ci/verify_release_asset.py
+          release-download
+          "${{ env.ASSET_NAME }}"
+
+      - name: Extract published release ZIP
+        run: >-
+          python -m zipfile -e
+          "release-download/${{ env.ASSET_NAME }}"
+          release-extracted
+
+      - name: Verify extracted bundle checksums
+        run: >-
+          python ci/verify_checksums.py
+          "release-extracted/${{ env.BUNDLE_DIR }}"
+
+      - name: Set up MATLAB consumer runtime
+        if: matrix.runtime == 'matlab'
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.matlab_release }}
+
+      - name: Install Octave consumer runtime on Linux
+        if: matrix.runtime == 'octave' && runner.os == 'Linux'
+        timeout-minutes: 20
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends octave
+
+      - name: Install Octave consumer runtime on Windows
+        if: matrix.runtime == 'octave' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install octave --yes --no-progress
+          $octaveCli = Get-ChildItem -LiteralPath 'C:\Program Files\GNU Octave' -Filter octave-cli.exe -Recurse |
+            Select-Object -First 1
+          if (-not $octaveCli) {
+            throw 'octave-cli.exe was not found after Chocolatey installation'
+          }
+          $octaveCli.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Octave consumer runtime on macOS
+        if: matrix.runtime == 'octave' && runner.os == 'macOS'
+        run: brew install octave
+
+      - name: Show Octave consumer runtime version
+        if: matrix.runtime == 'octave'
+        run: ${{ matrix.octave_cmd }} --version
+
+      - name: Smoke test published MATLAB asset
+        if: matrix.runtime == 'matlab'
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath(fullfile(pwd,'released-source','test'));
+            smoke_mex(fullfile(pwd,'release-extracted','${{ env.BUNDLE_DIR }}'))
+
+      - name: Smoke test published Octave asset
+        if: matrix.runtime == 'octave'
+        run: >-
+          ${{ matrix.octave_cmd }} --no-gui --quiet --eval
+          "addpath(fullfile(pwd,'released-source','test'));
+          smoke_mex(fullfile(pwd,'release-extracted','${{ env.BUNDLE_DIR }}'));"
+
+      - name: Verify bundle remains byte-identical after consumer test
+        run: >-
+          python ci/verify_checksums.py
+          "release-extracted/${{ env.BUNDLE_DIR }}"
