@@ -13,10 +13,25 @@ if ~exist(artifact_dir, 'dir')
         'Artifact directory does not exist: %s', artifact_dir);
 end
 
-addpath(artifact_dir);
+original_dir = pwd;
+cd(artifact_dir);
+artifact_dir = pwd;
+cd(original_dir);
+
+clear mex
+addpath(artifact_dir, '-begin');
 cleanup = onCleanup(@() rmpath(artifact_dir)); %#ok<NASGU>
 
 fprintf(1, 'Running MEX smoke tests from %s\n', artifact_dir);
+
+targets = {'assemble_f', 'assemble_m', 'assemble_s', 'assemble_se', ...
+           'chkmex', 'earrind', 'eindarr', 'findsp', 'fsetop', 'fsparse', ...
+           'iluk_Cmex', 'iluk_Cmex_nosymb', 'spsetd'};
+for i = 1:length(targets)
+    check_resolved(targets{i}, fullfile(artifact_dir, ...
+        [targets{i} '.' mexext()]));
+end
+check_resolved('iluk', fullfile(artifact_dir, 'iluk.m'));
 
 check_scalar(chkmex(), 1, 'chkmex');
 
@@ -44,12 +59,20 @@ S = sparse([2 -1; -1 2]);
 S_set = spsetd(S, 1);
 check_equal(full(S_set), [1 0; -1 2], 0, 'spsetd');
 
+S_complex = sparse([1 + 2i 3 + 4i; 5 + 6i 7 + 8i]);
+S_complex_set = spsetd(S_complex, 1);
+check_equal(full(S_complex_set), [1 0; 5 + 6i 7 + 8i], 0, ...
+    'spsetd complex');
+
 [L, U, levels] = iluk_Cmex(speye(3), 0);
 check_equal(full(L), eye(3), 1e-12, 'iluk_Cmex L');
 check_equal(full(U), eye(3), 1e-12, 'iluk_Cmex U');
 [L2, U2] = iluk_Cmex_nosymb(speye(3), levels);
 check_equal(full(L2), eye(3), 1e-12, 'iluk_Cmex_nosymb L');
 check_equal(full(U2), eye(3), 1e-12, 'iluk_Cmex_nosymb U');
+[L3, U3] = iluk(speye(3), 0);
+check_equal(full(L3), eye(3), 1e-12, 'iluk wrapper L');
+check_equal(full(U3), eye(3), 1e-12, 'iluk wrapper U');
 
 [rows, cols, coef] = assemble_m(1, 1, 1, 1, 1, 1);
 check_equal(rows, 1, 0, 'assemble_m rows');
@@ -65,6 +88,16 @@ check_equal(coef, 2, 1e-12, 'assemble_se values');
 check_equal(rows, [1; 2], 0, 'assemble_s rows');
 check_equal(coef, [0; 0], 1e-12, 'assemble_s values');
 
+[arows, acols, acoef, rrows, rcoef, stress] = assemble_s(3, ...
+    'NeoHookean_prestress', [1 .25], [0; 0; 0], 1, 1, 1, ...
+    [1 0 0 0 1 0 0 0 1], 1, 1, [0 0 0], zeros(9, 1));
+check_scalar(numel(arows), 9, 'assemble_s prestress rows');
+check_scalar(numel(acols), 9, 'assemble_s prestress columns');
+check_scalar(numel(acoef), 9, 'assemble_s prestress coefficients');
+check_scalar(numel(rrows), 3, 'assemble_s prestress residual rows');
+check_scalar(numel(rcoef), 3, 'assemble_s prestress residual values');
+check_scalar(numel(stress), 9, 'assemble_s prestress stress');
+
 [rows, cols, coef] = assemble_f('Stokes', 1, 1, 1, 1, 1, 1, ...
     1, 1, 1, 1, 1, 1);
 check_equal(rows, [1; 1; 2], 0, 'assemble_f rows');
@@ -72,6 +105,21 @@ check_equal(cols, [1; 2; 1], 0, 'assemble_f columns');
 check_equal(coef, [2; -1; 1], 1e-12, 'assemble_f values');
 
 fprintf(1, 'All MEX smoke tests passed.\n');
+end
+
+
+function check_resolved(name, expected)
+resolved = which(name);
+if ispc
+    matches = strcmpi(resolved, expected);
+else
+    matches = strcmp(resolved, expected);
+end
+if ~matches
+    error('SMOKE_MEX:Resolution', ...
+        '%s resolved to %s instead of artifact file %s.', ...
+        name, resolved, expected);
+end
 end
 
 

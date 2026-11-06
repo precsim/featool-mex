@@ -140,6 +140,17 @@ def main() -> int:
         encoding="utf-8",
     )
 
+    nested_entries = sorted(
+        path.relative_to(directory).as_posix()
+        for path in directory.rglob("*")
+        if path.parent != directory or path.is_dir()
+    )
+    if nested_entries:
+        raise SystemExit(
+            "artifact directory must be flat; unexpected nested entries: "
+            + ", ".join(nested_entries)
+        )
+
     checksum_path = directory / "SHA256SUMS"
     files = sorted(
         path

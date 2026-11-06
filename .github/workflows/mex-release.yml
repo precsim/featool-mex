@@ -28,6 +28,25 @@ jobs:
           echo "Tag releases require repository variable ENABLE_MEX_LEGACY_RELEASE=true." >&2
           echo "This prevents jobs from queueing for absent self-hosted controller runners." >&2
           exit 1
+      - name: Require MATLAB compatibility ABI ceilings
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && inputs.include_compatibility)
+        env:
+          MATLAB_R2011A_LINUX_MAX_GLIBCXX: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GLIBCXX }}"
+          MATLAB_R2011A_LINUX_MAX_CXXABI: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_CXXABI }}"
+          MATLAB_R2011A_LINUX_MAX_GCC: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GCC }}"
+          MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
+          MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
+        run: |
+          missing=0
+          for name in MATLAB_R2011A_LINUX_MAX_GLIBCXX MATLAB_R2011A_LINUX_MAX_CXXABI MATLAB_R2011A_LINUX_MAX_GCC MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing repository variable: MEX_${name}" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
       - name: Require Octave compatibility infrastructure and version floors
         if: >-
           github.event_name == 'push' ||
@@ -37,15 +56,20 @@ jobs:
           OCTAVE_WINDOWS_VERSION: "${{ vars.MEX_OCTAVE_WINDOWS_VERSION }}"
           OCTAVE_LINUX_VERSION: "${{ vars.MEX_OCTAVE_LINUX_VERSION }}"
           OCTAVE_LINUX_MAX_GLIBC: "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBC }}"
+          OCTAVE_LINUX_MAX_GLIBCXX: "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBCXX }}"
+          OCTAVE_LINUX_MAX_CXXABI: "${{ vars.MEX_OCTAVE_LINUX_MAX_CXXABI }}"
+          OCTAVE_LINUX_MAX_GCC: "${{ vars.MEX_OCTAVE_LINUX_MAX_GCC }}"
           OCTAVE_MACOS_X64_VERSION: "${{ vars.MEX_OCTAVE_MACOS_X64_VERSION }}"
           OCTAVE_MACOS_ARM64_VERSION: "${{ vars.MEX_OCTAVE_MACOS_ARM64_VERSION }}"
+          OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
+          OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
         run: |
           if [[ "$ENABLE_OCTAVE" != "true" ]]; then
             echo "Octave compatibility releases require ENABLE_MEX_OCTAVE_RELEASE=true." >&2
             exit 1
           fi
           missing=0
-          for name in OCTAVE_WINDOWS_VERSION OCTAVE_LINUX_VERSION OCTAVE_LINUX_MAX_GLIBC OCTAVE_MACOS_X64_VERSION OCTAVE_MACOS_ARM64_VERSION; do
+          for name in OCTAVE_WINDOWS_VERSION OCTAVE_LINUX_VERSION OCTAVE_LINUX_MAX_GLIBC OCTAVE_LINUX_MAX_GLIBCXX OCTAVE_LINUX_MAX_CXXABI OCTAVE_LINUX_MAX_GCC OCTAVE_MACOS_X64_VERSION OCTAVE_MACOS_ARM64_VERSION OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET; do
             if [[ -z "${!name}" ]]; then
               echo "Missing repository variable: MEX_${name}" >&2
               missing=1
@@ -112,6 +136,9 @@ jobs:
           "dist/matlab/${{ matrix.platform }}"
           --extensions "${{ matrix.extension }}"
           --max-glibc 2.5
+          --max-glibcxx "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GLIBCXX }}"
+          --max-cxxabi "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_CXXABI }}"
+          --max-gcc "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GCC }}"
           --output "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
       - name: Inspect Windows compatibility binary
@@ -129,6 +156,8 @@ jobs:
           "dist/matlab/${{ matrix.platform }}"
           x86_64
           "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          false
+          "${{ vars.MEX_MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
 
       - name: Inspect Apple silicon compatibility binary
         if: matrix.audit == 'macos-arm64'
@@ -137,6 +166,8 @@ jobs:
           "dist/matlab/${{ matrix.platform }}"
           arm64
           "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          false
+          "${{ vars.MEX_MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
 
       - name: Finalize compatibility artifact
         run: >-
@@ -259,6 +290,9 @@ jobs:
           "dist/octave/${{ matrix.platform }}"
           --extensions mex
           --max-glibc "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBC }}"
+          --max-glibcxx "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBCXX }}"
+          --max-cxxabi "${{ vars.MEX_OCTAVE_LINUX_MAX_CXXABI }}"
+          --max-gcc "${{ vars.MEX_OCTAVE_LINUX_MAX_GCC }}"
           --output "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
       - name: Inspect Octave Windows compatibility ABI
@@ -277,6 +311,8 @@ jobs:
           "dist/octave/${{ matrix.platform }}"
           x86_64
           "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          false
+          "${{ vars.MEX_OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
 
       - name: Inspect Octave Apple silicon compatibility ABI
         if: matrix.audit == 'macos-arm64'
@@ -285,6 +321,8 @@ jobs:
           "dist/octave/${{ matrix.platform }}"
           arm64
           "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          false
+          "${{ vars.MEX_OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
 
       - name: Finalize Octave compatibility artifact
         run: >-

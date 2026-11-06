@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 3 ]]; then
-  echo "usage: check_macos_binary.sh <directory> <x86_64|arm64> <report-file> [allow-openmp]" >&2
+  echo "usage: check_macos_binary.sh <directory> <x86_64|arm64> <report-file> [allow-openmp] [max-deployment-target]" >&2
   exit 2
 fi
 
@@ -13,7 +13,15 @@ allow_openmp="false"
 if [[ $# -ge 4 ]]; then
   allow_openmp="$4"
 fi
-max_deployment_target="${MEX_MAX_MACOS_DEPLOYMENT_TARGET:-}"
+max_deployment_target=""
+if [[ $# -ge 5 ]]; then
+  max_deployment_target="$5"
+fi
+
+if [[ $# -ge 5 && -z "$max_deployment_target" ]]; then
+  echo "max-deployment-target must be non-empty" >&2
+  exit 2
+fi
 
 mkdir -p "$(dirname "$report_file")"
 : > "$report_file"

@@ -46,6 +46,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("directory", type=Path)
     parser.add_argument("--extensions", default="mexa64,mex")
     parser.add_argument("--max-glibc")
+    parser.add_argument("--max-glibcxx")
+    parser.add_argument("--max-cxxabi")
+    parser.add_argument("--max-gcc")
     parser.add_argument("--allow-openmp", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
@@ -87,11 +90,19 @@ def main() -> int:
             versions[namespace].add(value)
         maxima = {name: highest(values) for name, values in versions.items()}
 
-        if args.max_glibc and maxima["GLIBC"]:
-            if version_tuple(maxima["GLIBC"]) > version_tuple(args.max_glibc):
+        ceilings = {
+            "GLIBC": args.max_glibc,
+            "GLIBCXX": args.max_glibcxx,
+            "CXXABI": args.max_cxxabi,
+            "GCC": args.max_gcc,
+        }
+        for namespace, ceiling in ceilings.items():
+            if ceiling and maxima[namespace]:
+                if version_tuple(maxima[namespace]) <= version_tuple(ceiling):
+                    continue
                 failures.append(
-                    f"{binary.name}: GLIBC_{maxima['GLIBC']} exceeds "
-                    f"configured floor GLIBC_{args.max_glibc}"
+                    f"{binary.name}: {namespace}_{maxima[namespace]} exceeds "
+                    f"configured ceiling {namespace}_{ceiling}"
                 )
 
         report["binaries"][binary.name] = {

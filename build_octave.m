@@ -44,7 +44,7 @@ end
 targets = select_targets(build_manifest(), opt.target);
 
 if opt.clean
-    clean_output(opt.outdir, mx);
+    clean_output(opt.outdir, mx, opt.srcdir);
     info = [];
     return
 end
@@ -209,16 +209,24 @@ end
 end
 
 
-function clean_output(outdir, mx)
+function clean_output(outdir, mx, srcdir)
 if ~exist(outdir, 'dir')
     return
 end
-patterns = {['*.' mx], '*.m', 'BUILD-INFO.json', 'SHA256SUMS', ...
+patterns = {['*.' mx], 'BUILD-INFO.json', 'SHA256SUMS', ...
             'COMPATIBILITY.txt', '*-ABI.json', '*-ABI.txt'};
 for i = 1:length(patterns)
     files = dir(fullfile(outdir, patterns{i}));
     for j = 1:length(files)
         delete(fullfile(outdir, files(j).name));
+    end
+end
+
+wrappers = dir(fullfile(srcdir, '*.m'));
+for i = 1:length(wrappers)
+    wrapper = fullfile(outdir, wrappers(i).name);
+    if exist(wrapper, 'file')
+        delete(wrapper);
     end
 end
 end

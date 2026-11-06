@@ -76,7 +76,7 @@ targets = build_manifest();
 targets = select_targets(targets, opt.target);
 
 if opt.clean
-    clean_output(opt.outdir, opt.mx);
+    clean_output(opt.outdir, opt.mx, opt.srcdir);
     info = [];
     return
 end
@@ -113,14 +113,16 @@ for i = 1:length(targets)
         args{end + 1} = ['-D' target.defines{j}];
     end
 
-    mexopts_file = target_mexopts(opt.mexopts, target.language);
+    explicit_mexopts_file = target_mexopts(opt.mexopts, target.language);
+    mexopts_file = explicit_mexopts_file;
     if isempty(mexopts_file) && ~isempty(opt.compiler)
         mexopts_file = compiler_mexopts(opt.compiler, target.language);
     end
     args = [args c_standard_args(target.language, opt.mx, ...
         mexopts_file, opt.compiler)]; %#ok<AGROW>
     if opt.openmp && target.openmp
-        args = [args openmp_args(target.language, opt.mx, mexopts_file)]; %#ok<AGROW>
+        args = [args openmp_args(target.language, opt.mx, mexopts_file, ...
+            opt.compiler, ~isempty(explicit_mexopts_file))]; %#ok<AGROW>
     end
 
     if ~isempty(mexopts_file)
@@ -267,14 +269,27 @@ end
 end
 
 
-function args = openmp_args(language, mx, mexopts)
-if ~isempty(mexopts)
+function args = openmp_args(language, mx, mexopts, compiler_name, explicit_mexopts)
+if explicit_mexopts
     args = {};
     return
 end
 
 if strncmpi(mx, 'mexw', 4)
-    args = {'COMPFLAGS=$COMPFLAGS /openmp'};
+    hint = lower([compiler_name ' ' mexopts]);
+    use_gnu_flags = ~isempty(strfind(hint, 'mingw')) || ...
+                    ~isempty(strfind(hint, 'gcc')) || ...
+                    ~isempty(strfind(hint, 'gnu')) || ...
+                    ~isempty(strfind(hint, 'tdm'));
+    if use_gnu_flags
+        if strcmpi(language, 'cpp')
+            args = {'CXXFLAGS=$CXXFLAGS -fopenmp', 'LDFLAGS=$LDFLAGS -fopenmp'};
+        else
+            args = {'CFLAGS=$CFLAGS -fopenmp', 'LDFLAGS=$LDFLAGS -fopenmp'};
+        end
+    else
+        args = {'COMPFLAGS=$COMPFLAGS /openmp'};
+    end
 elseif strncmpi(mx, 'mexa', 4)
     if strcmpi(language, 'cpp')
         args = {'CXXFLAGS=$CXXFLAGS -fopenmp', 'LDFLAGS=$LDFLAGS -fopenmp'};
@@ -326,16 +341,24 @@ end
 end
 
 
-function clean_output(outdir, mx)
+function clean_output(outdir, mx, srcdir)
 if ~exist(outdir, 'dir')
     return
 end
-patterns = {['*.' mx], '*.m', 'BUILD-INFO.json', 'SHA256SUMS', ...
+patterns = {['*.' mx], 'BUILD-INFO.json', 'SHA256SUMS', ...
             'COMPATIBILITY.txt', '*-ABI.json', '*-ABI.txt'};
 for i = 1:length(patterns)
     files = dir(fullfile(outdir, patterns{i}));
     for j = 1:length(files)
         delete(fullfile(outdir, files(j).name));
+    end
+end
+
+wrappers = dir(fullfile(srcdir, '*.m'));
+for i = 1:length(wrappers)
+    wrapper = fullfile(outdir, wrappers(i).name);
+    if exist(wrapper, 'file')
+        delete(wrapper);
     end
 end
 end

@@ -55,7 +55,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   const mwSize nrows = mxGetM(a);
   const mwSize ncols = mxGetN(a);
   const mwIndex na = *(jca + ncols);
-  double *restrict pa = (double *)mxGetData(a);
+  double *restrict pa = mxGetPr(a);
+  double *restrict pia = mxGetPi(a);
   if (na < 1) {return;}
 
   /* Row pointers */
@@ -89,9 +90,15 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
       if (indrows[i] != 0) {
         if (i == j) {
           pa[ii] = 1.;
+          if (pia != NULL) {
+            pia[ii] = 0.;
+          }
           indrows[i] = 1;
         } else {
           pa[ii] = 0.;
+          if (pia != NULL) {
+            pia[ii] = 0.;
+          }
         }
       }
     }

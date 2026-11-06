@@ -25,12 +25,18 @@ def main() -> int:
         raise SystemExit(f"missing checksum file: {sums}")
 
     checked = 0
+    listed: set[str] = set()
     for raw_line in sums.read_text(encoding="utf-8").splitlines():
         if not raw_line.strip():
             continue
         expected, separator, name = raw_line.partition("  ")
         if not separator or not expected or not name:
             raise SystemExit(f"invalid SHA256SUMS line: {raw_line!r}")
+        if "/" in name or "\\" in name or Path(name).name != name or name in (".", ".."):
+            raise SystemExit(f"invalid checksum path: {name!r}")
+        if name in listed:
+            raise SystemExit(f"duplicate checksum entry: {name}")
+        listed.add(name)
         path = directory / name
         if not path.is_file():
             raise SystemExit(f"checksummed file is missing: {name}")
@@ -43,6 +49,33 @@ def main() -> int:
 
     if checked == 0:
         raise SystemExit("SHA256SUMS contains no files")
+
+    nested_entries = sorted(
+        path.relative_to(directory).as_posix()
+        for path in directory.rglob("*")
+        if path.parent != directory or path.is_dir()
+    )
+    if nested_entries:
+        raise SystemExit(
+            "artifact directory must be flat; unexpected nested entries: "
+            + ", ".join(nested_entries)
+        )
+
+    actual_files = {
+        path.name
+        for path in directory.iterdir()
+        if path.is_file() and path.name != sums.name
+    }
+    if listed != actual_files:
+        missing = sorted(actual_files - listed)
+        extra = sorted(listed - actual_files)
+        details = []
+        if missing:
+            details.append("unlisted files: " + ", ".join(missing))
+        if extra:
+            details.append("listed but absent files: " + ", ".join(extra))
+        raise SystemExit("checksum manifest does not match artifact: " + "; ".join(details))
+
     print(f"verified {checked} artifact checksums")
     return 0
 

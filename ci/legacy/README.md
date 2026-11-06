@@ -55,11 +55,19 @@ macOS controllers need `bash`, `file`, `lipo`, and `otool`. These tools
 inspect the returned binaries on the controller rather than inside the preserved
 appliance.
 
-macOS compatibility controller services should set
-`MEX_MAX_MACOS_DEPLOYMENT_TARGET` to the newest deployment target allowed
-for that preserved build appliance. The Mach-O audit fails if any returned MEX
-binary requires a newer macOS target, and records the measured target in the
-artifact metadata.
+macOS compatibility releases require an explicit deployment-target ceiling for
+each preserved appliance. Configure the following repository variables with the
+newest target that the corresponding compatibility artifact is allowed to
+require:
+
+- `MEX_MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET`
+- `MEX_MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET`
+- `MEX_OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET`
+- `MEX_OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET`
+
+The release preflight rejects missing values. The Mach-O audit receives the
+configured ceiling explicitly, fails if any returned MEX binary requires a
+newer macOS target, and records the measured target in the artifact metadata.
 
 All C targets require C99. The appliance must configure C compilation with
 `-std=c99` (or an equivalent verified mode) in its explicit MEX options. The
@@ -90,9 +98,16 @@ exist. Tag releases require those variables and build Octave artifacts on the
 preserved versions, then forward-test the exact downloaded binaries on current
 GitHub-hosted Octave installations without rebuilding.
 
-Also set `MEX_OCTAVE_LINUX_MAX_GLIBC` to the measured release ceiling (for example
-`2.12` or `2.17`) established by the preserved Linux Octave builder. The
-release audit fails if any target imports a newer GLIBC symbol.
+Also set the following variables to the measured release ceilings established
+by the preserved Linux Octave builder:
+
+- `MEX_OCTAVE_LINUX_MAX_GLIBC`
+- `MEX_OCTAVE_LINUX_MAX_GLIBCXX`
+- `MEX_OCTAVE_LINUX_MAX_CXXABI`
+- `MEX_OCTAVE_LINUX_MAX_GCC`
+
+The release audit fails if any target imports a newer symbol in any configured
+namespace.
 
 The Windows sources use C99 features including variable-length arrays and
 declarations in `for` initializers. If the compiler officially supported by
@@ -106,6 +121,15 @@ The workflow performs platform binary inspection after the appliance returns
 the artifacts. The Linux R2011a job enforces a maximum imported
 `GLIBC_2.5` symbol version; if that objective proves impossible, change the
 declared floor only after recording the measured replacement floor.
+
+The R2011a C++ and compiler-runtime ceilings are not hard-coded because they
+depend on the exact validated toolchain. Record the measured ceilings from the
+preserved builder in these required repository variables before enabling a
+compatibility release:
+
+- `MEX_MATLAB_R2011A_LINUX_MAX_GLIBCXX`
+- `MEX_MATLAB_R2011A_LINUX_MAX_CXXABI`
+- `MEX_MATLAB_R2011A_LINUX_MAX_GCC`
 
 The repository variable `ENABLE_MEX_LEGACY_RELEASE=true` is required before a
 version tag can schedule these controller jobs. This prevents releases from
