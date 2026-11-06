@@ -41,6 +41,41 @@ check_equal(out, [30 10], 0, 'eindarr');
 out = eindarr([1 2 3; 4 5 6], [3 1]);
 check_equal(out, [3 6; 1 4], 0, 'eindarr wide matrix');
 
+out = eindarr([1 2; 3 4], [2 1]);
+check_equal(out, [3 4; 1 2], 0, 'eindarr square matrix');
+
+out = eindarr(single([10 20 30]), uint32([3 1]));
+check_equal(out, single([30 10]), 0, 'eindarr single integer indices');
+
+out = eindarr([10 20 30], int64([3 1]));
+check_equal(out, [30 10], 0, 'eindarr int64 indices');
+
+out = eindarr([10 20 30], uint64([3 1]));
+check_equal(out, [30 10], 0, 'eindarr uint64 indices');
+
+out = eindarr([10; 20; 30], [3 1]);
+check_equal(out, [30 10], 0, 'eindarr vector index shape');
+
+c_nd = reshape([4 1 3 2], [2 1 2]);
+out = eindarr([10 20 30 40], c_nd);
+check_equal(out, reshape([40 10 30 20], [2 1 2]), 0, 'eindarr N-D index shape');
+
+out = eindarr([10 20 30], zeros(1, 0));
+check_equal(out, zeros(1, 0), 0, 'eindarr empty indices');
+
+bad_indices = {0, -1, 1.5, 4, NaN, Inf, int32(-1), uint32(4)};
+for i = 1:length(bad_indices)
+    caught = false;
+    try
+        out = eindarr([10 20 30], bad_indices{i}); %#ok<NASGU>
+    catch
+        caught = true;
+    end
+    if ~caught
+        error('SMOKE_MEX:Failure', 'eindarr accepted an invalid index.');
+    end
+end
+
 caught = false;
 try
     out = eindarr(complex([1 2 3]), 1); %#ok<NASGU>
@@ -56,6 +91,83 @@ check_equal(out, 30, 0, 'earrind');
 
 out = earrind([1 2; 3 4], [2 1 2]);
 check_equal(out, [3 4; 1 2; 3 4], 0, 'earrind indexed rows');
+
+out = earrind([1 2; 3 4], [1 2]);
+check_equal(out, [1 2; 3 4], 0, 'earrind row range');
+
+out = earrind([1 2; 3 4], [2 1 2], [10 20]);
+check_equal(out, [110; 50; 110], 0, 'earrind weighted indexed rows');
+
+out = earrind([1 2; 3 4], [1 2], [10 20]);
+check_equal(out, [50; 110], 0, 'earrind weighted row range');
+
+out = earrind([1 2; 3 4], zeros(1, 0));
+check_equal(out, zeros(0, 2), 0, 'earrind empty indices');
+
+out = earrind([1 2; 3 4], zeros(1, 0), [10 20]);
+check_equal(out, zeros(0, 1), 0, 'earrind weighted empty indices');
+
+out = earrind([1 2; 3 4], [1 2], 2);
+check_equal(out, [6; 14], 0, 'earrind scalar weight broadcast');
+
+bad_ranges = {[0 1], [1 3], [1 1.5], [1 NaN]};
+for i = 1:length(bad_ranges)
+    caught = false;
+    try
+        out = earrind([1 2; 3 4], bad_ranges{i}); %#ok<NASGU>
+    catch
+        caught = true;
+    end
+    if ~caught
+        error('SMOKE_MEX:Failure', 'earrind accepted an invalid row range.');
+    end
+end
+
+bad_index_vectors = {[1 0 2], [1 3 2], [1 1.5 2], [1 Inf 2]};
+for i = 1:length(bad_index_vectors)
+    caught = false;
+    try
+        out = earrind([1 2; 3 4], bad_index_vectors{i}); %#ok<NASGU>
+    catch
+        caught = true;
+    end
+    if ~caught
+        error('SMOKE_MEX:Failure', 'earrind accepted an invalid row index.');
+    end
+end
+
+caught = false;
+try
+    out = earrind(zeros(0, 1), [1 1]); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'earrind accepted a range into an empty array.');
+end
+
+bad_weights = {[], [1 2 3]};
+for i = 1:length(bad_weights)
+    caught = false;
+    try
+        out = earrind([1 2; 3 4], [1 2], bad_weights{i}); %#ok<NASGU>
+    catch
+        caught = true;
+    end
+    if ~caught
+        error('SMOKE_MEX:Failure', 'earrind accepted a mismatched weight vector.');
+    end
+end
+
+caught = false;
+try
+    out = earrind([1 2 3; 4 5 6], [1 2], [1 2]); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'earrind accepted a partially short weight vector.');
+end
 
 caught = false;
 try
@@ -147,6 +259,13 @@ S = sparse([2 -1; -1 2]);
 S_set = spsetd(S, 1);
 check_equal(full(S_set), [1 0; -1 2], 0, 'spsetd');
 
+S_duplicate_set = spsetd(S, [1 1]);
+check_equal(full(S_duplicate_set), [1 0; -1 2], 0, 'spsetd duplicate rows');
+
+S_multi = sparse(reshape(1:9, 3, 3));
+S_multi_set = spsetd(S_multi, [3 2 3]);
+check_equal(full(S_multi_set), [1 4 7; 0 1 0; 0 0 1], 0, 'spsetd multiple rows');
+
 check_equal(full(S), [2 -1; -1 2], 0, 'spsetd input unchanged');
 
 S_complex = sparse([1 + 2i 3 + 4i; 5 + 6i 7 + 8i]);
@@ -174,6 +293,10 @@ S_far = sparse(100, 100);
 S_far(100, 100) = 2;
 S_far_set = spsetd(S_far, 100);
 check_equal(full(S_far_set(100, 100)), 1, 0, 'spsetd far row');
+
+S_empty_selection = spsetd(sparse(1000000, 1), []);
+check_equal(size(S_empty_selection), [1000000 1], 0, 'spsetd empty selection size');
+check_scalar(nnz(S_empty_selection), 0, 'spsetd empty selection values');
 
 caught = false;
 try
