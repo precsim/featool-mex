@@ -5,10 +5,12 @@
 #include <omp.h>
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__)
 #define restrict __restrict__
-#elif __INTEL_COMPILER
+#elif defined(__INTEL_COMPILER)
 #define restrict restrict
+#elif defined(_MSC_VER)
+#define restrict __restrict
 #endif
 
 /** earrind.c - Extract indexed values from array

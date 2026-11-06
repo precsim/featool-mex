@@ -6,7 +6,6 @@
 #include "mex.h"
 #include <stdio.h>
 #include <math.h>
-#include "blas.h"
 #include <string.h>
 #include "Tools.h"
 

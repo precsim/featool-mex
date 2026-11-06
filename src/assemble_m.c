@@ -6,12 +6,9 @@
 #include "mex.h"
 #include <stdio.h>
 #include <math.h>
-#include "blas.h"
 #include <string.h>
 #ifdef _OPENMP
     #include <omp.h>
-#else
-    #warning "OpenMP not enabled. Compile with mex ADR_assembler_C_omp.c CFLAGS="\$CFLAGS -fopenmp" LDFLAGS="\$LDFLAGS -fopenmp""
 #endif
 
 void mexFunction(int nlhs,mxArray* plhs[], int nrhs, const mxArray* prhs[])

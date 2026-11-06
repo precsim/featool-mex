@@ -5,10 +5,12 @@
 #include <omp.h>
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__)
 #define restrict __restrict__
-#elif __INTEL_COMPILER
+#elif defined(__INTEL_COMPILER)
 #define restrict restrict
+#elif defined(_MSC_VER)
+#define restrict __restrict
 #endif
 
 /** spsetd.c - Diagonalize selected rows in sparse matrix
@@ -39,10 +41,11 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
 
   /* Sparse matrix A */
-  const mwSize *restrict jca = mxGetJc(prhs[0]);
-  const mwSize *restrict ira = mxGetIr(prhs[0]);
+  const mwIndex *restrict jca = mxGetJc(prhs[0]);
+  const mwIndex *restrict ira = mxGetIr(prhs[0]);
+  const mwSize nrows = mxGetM(prhs[0]);
   const mwSize ncols = mxGetN(prhs[0]);
-  const mwSize na = *(jca + ncols);
+  const mwIndex na = *(jca + ncols);
   double *restrict pa = (double *)mxGetData(prhs[0]);
   if (na < 1) {return;}
 
@@ -50,11 +53,11 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   int i, ii, j, nerr = 0;
   const double *restrict rp = (double *)mxGetData(prhs[1]);
   const mwSize nrp = mxGetNumberOfElements(prhs[1]);
-  int8_T* indrows = mxCalloc(na, sizeof(int8_T));
+  int8_T* indrows = mxCalloc(nrows, sizeof(int8_T));
 #pragma omp parallel for private(i,ii) reduction(+:nerr)
   for (ii = 0; ii < nrp; ++ii) {
     i = (int)rp[ii];
-    if (i >= 1 && i <= na) {
+    if (i >= 1 && i <= nrows) {
       indrows[i-1] = -1;
     } else {
       nerr += 1;
@@ -86,7 +89,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   }
 
 #pragma omp parallel for private(i) reduction(+:nerr)
-  for (i = 0; i < na; ++i) {
+  for (i = 0; i < nrows; ++i) {
     if (indrows[i] < 0) {
       nerr += 1;
 #ifndef _OPENMP

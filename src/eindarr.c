@@ -6,15 +6,17 @@
 #include <omp.h>
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__)
 #define restrict __restrict__
-#elif __INTEL_COMPILER
+#elif defined(__INTEL_COMPILER)
 #define restrict restrict
+#elif defined(_MSC_VER)
+#define restrict __restrict
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__)
 #define POMP _Pragma( "omp parallel for private(i)" )
-#elif __INTEL_COMPILER || _MSC_VER
+#elif defined(__INTEL_COMPILER) || defined(_MSC_VER)
 #define POMP __pragma( omp parallel for private(i) )
 #endif
 

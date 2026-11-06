@@ -1,0 +1,258 @@
+name: MEX compatibility release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      include_legacy:
+        description: Run preserved MATLAB compatibility builders
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/check_manifest.py
+      - name: Require compatibility infrastructure for tag releases
+        if: github.event_name == 'push' && vars.ENABLE_MEX_LEGACY_RELEASE != 'true'
+        run: |
+          echo "Tag releases require repository variable ENABLE_MEX_LEGACY_RELEASE=true." >&2
+          echo "This prevents jobs from queueing for absent self-hosted controller runners." >&2
+          exit 1
+
+  compatibility-build:
+    name: Compatibility build ${{ matrix.platform }}
+    needs: preflight
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.include_legacy) ||
+      (github.event_name == 'push' && vars.ENABLE_MEX_LEGACY_RELEASE == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            version: R2011a
+            extension: mexa64
+            runner: '["self-hosted","mex-controller","linux","x64"]'
+            audit: linux
+            audit_file: linux-ABI.json
+          - platform: windows-x86_64
+            version: R2011a
+            extension: mexw64
+            runner: '["self-hosted","mex-controller","windows","x64"]'
+            audit: windows
+            audit_file: windows-ABI.txt
+          - platform: macos-x86_64
+            version: R2011a
+            extension: mexmaci64
+            runner: '["self-hosted","mex-controller","macos","x64"]'
+            audit: macos-x86_64
+            audit_file: macos-ABI.txt
+          - platform: macos-arm64
+            version: R2023b
+            extension: mexmaca64
+            runner: '["self-hosted","mex-controller","macos","arm64"]'
+            audit: macos-arm64
+            audit_file: macos-ABI.txt
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build in preserved MATLAB appliance and smoke test there
+        run: >-
+          python ci/run_legacy_controller.py
+          --runtime matlab
+          --version "${{ matrix.version }}"
+          --platform "${{ matrix.platform }}"
+          --source .
+          --output "dist/matlab/${{ matrix.platform }}"
+
+      - name: Enforce Linux compatibility ABI
+        if: matrix.audit == 'linux'
+        run: >-
+          python ci/check_linux_abi.py
+          "dist/matlab/${{ matrix.platform }}"
+          --extensions "${{ matrix.extension }}"
+          --max-glibc 2.5
+          --output "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Windows compatibility binary
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        run: >-
+          ./ci/check_windows_binary.ps1
+          -Directory "dist/matlab/${{ matrix.platform }}"
+          -ReportFile "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Intel macOS compatibility binary
+        if: matrix.audit == 'macos-x86_64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/matlab/${{ matrix.platform }}"
+          x86_64
+          "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Apple silicon compatibility binary
+        if: matrix.audit == 'macos-arm64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/matlab/${{ matrix.platform }}"
+          arm64
+          "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Finalize compatibility artifact
+        run: >-
+          python ci/finalize_artifact.py
+          "dist/matlab/${{ matrix.platform }}"
+          --extension "${{ matrix.extension }}"
+          --runtime matlab
+          --platform "${{ matrix.platform }}"
+          --audit-file "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          --compatibility "${{ matrix.version }} compatibility build, same-runtime smoke test, and binary audit passed"
+
+      - name: Upload immutable compatibility artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: matlab-${{ matrix.platform }}-compatibility
+          path: dist/matlab/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  forward-runtime:
+    name: Forward runtime ${{ matrix.platform }}
+    needs: compatibility-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            release: R2026b
+            platform: linux-x86_64
+          - runner: windows-2025
+            release: R2026b
+            platform: windows-x86_64
+          - runner: macos-15-intel
+            release: R2025b
+            platform: macos-x86_64
+          - runner: macos-15
+            release: R2026b
+            platform: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download exact compatibility artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-${{ matrix.platform }}-compatibility
+          path: dist/matlab/${{ matrix.platform }}
+
+      - name: Verify internal artifact checksums
+        run: >-
+          python ci/verify_checksums.py
+          "dist/matlab/${{ matrix.platform }}"
+
+      - name: Set up forward MATLAB runtime
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+
+      - name: Smoke test downloaded artifact without rebuilding
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            smoke_mex(fullfile(pwd,'dist','matlab','${{ matrix.platform }}'))
+
+  release-bundle:
+    name: Assemble validated release bundles
+    needs:
+      - compatibility-build
+      - forward-runtime
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download Linux compatibility artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-linux-x86_64-compatibility
+          path: release/matlab-linux-x86_64
+      - name: Download Windows compatibility artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-windows-x86_64-compatibility
+          path: release/matlab-windows-x86_64
+      - name: Download Intel macOS compatibility artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-macos-x86_64-compatibility
+          path: release/matlab-macos-x86_64
+      - name: Download Apple silicon compatibility artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-macos-arm64-compatibility
+          path: release/matlab-macos-arm64
+
+      - name: Verify compatibility artifact checksums
+        run: |
+          python3 ci/verify_checksums.py release/matlab-linux-x86_64
+          python3 ci/verify_checksums.py release/matlab-windows-x86_64
+          python3 ci/verify_checksums.py release/matlab-macos-x86_64
+          python3 ci/verify_checksums.py release/matlab-macos-arm64
+
+      - name: Record forward-runtime validation
+        env:
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          for dir in release/matlab-*; do
+            {
+              echo "Forward-runtime validation passed."
+              echo "Validation workflow: $RUN_URL"
+              echo "Source SHA: $GITHUB_SHA"
+              echo "The MEX binaries are byte-identical to the compatibility artifacts tested by the forward-runtime jobs."
+            } > "$dir/FORWARD-VALIDATION.txt"
+          done
+
+      - name: Create platform bundles
+        run: |
+          mkdir -p bundles
+          for dir in release/matlab-*; do
+            name="$(basename "$dir")"
+            (cd release && zip -qr "../bundles/$name.zip" "$name")
+          done
+
+      - name: Upload release bundles
+        uses: actions/upload-artifact@v7
+        with:
+          name: matlab-release-bundles
+          path: bundles/*.zip
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push'
+    needs: release-bundle
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated bundles
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-release-bundles
+          path: bundles
+      - name: Attach bundles to GitHub Release
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: gh release create "$GITHUB_REF_NAME" bundles/*.zip --generate-notes
