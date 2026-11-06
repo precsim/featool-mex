@@ -1,14 +1,15 @@
 #include "mex.h"
-#include "matrix.h"
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__)
 #define restrict __restrict__
-#elif __INTEL_COMPILER
+#elif defined(__INTEL_COMPILER)
 #define restrict restrict
+#elif defined(_MSC_VER)
+#define restrict __restrict
 #endif
 
 /** spsetd.c - Diagonalize selected rows in sparse matrix
@@ -30,6 +31,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
   if (nrhs != 2)
     mexErrMsgTxt("Expecting two input arguments.");
+  if (nlhs > 1)
+    mexErrMsgTxt("Expecting at most one output argument.");
 
   if (!mxIsSparse(prhs[0]) || !mxIsDouble(prhs[0]))
     mexErrMsgTxt("Expecting sparse double matrix as first input.");
@@ -38,23 +41,33 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     mexErrMsgTxt("Expecting full double array as second input.");
 
 
-  /* Sparse matrix A */
-  const mwSize *restrict jca = mxGetJc(prhs[0]);
-  const mwSize *restrict ira = mxGetIr(prhs[0]);
-  const mwSize ncols = mxGetN(prhs[0]);
-  const mwSize na = *(jca + ncols);
-  double *restrict pa = (double *)mxGetData(prhs[0]);
-  if (na < 1) {return;}
+  /*
+     Sparse matrix A.  Preserve the historical no-output in-place behavior,
+     but provide a safe copy-on-write path when an output is requested.
+  */
+  mxArray *a = (mxArray *)prhs[0];
+  if (nlhs == 1) {
+    plhs[0] = mxDuplicateArray(prhs[0]);
+    a = plhs[0];
+  }
+  const mwIndex *restrict jca = mxGetJc(a);
+  const mwIndex *restrict ira = mxGetIr(a);
+  const mwSize nrows = mxGetM(a);
+  const mwSize ncols = mxGetN(a);
+  const mwIndex na = *(jca + ncols);
+  double *restrict pa = mxGetPr(a);
+  double *restrict pia = mxGetPi(a);
+  if (na < 1 && nlhs == 0) {return;}
 
   /* Row pointers */
   int i, ii, j, nerr = 0;
   const double *restrict rp = (double *)mxGetData(prhs[1]);
   const mwSize nrp = mxGetNumberOfElements(prhs[1]);
-  int8_T* indrows = mxCalloc(na, sizeof(int8_T));
+  int8_T* indrows = mxCalloc(nrows, sizeof(int8_T));
 #pragma omp parallel for private(i,ii) reduction(+:nerr)
   for (ii = 0; ii < nrp; ++ii) {
     i = (int)rp[ii];
-    if (i >= 1 && i <= na) {
+    if (i >= 1 && i <= nrows) {
       indrows[i-1] = -1;
     } else {
       nerr += 1;
@@ -77,16 +90,22 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
       if (indrows[i] != 0) {
         if (i == j) {
           pa[ii] = 1.;
+          if (pia != NULL) {
+            pia[ii] = 0.;
+          }
           indrows[i] = 1;
         } else {
           pa[ii] = 0.;
+          if (pia != NULL) {
+            pia[ii] = 0.;
+          }
         }
       }
     }
   }
 
 #pragma omp parallel for private(i) reduction(+:nerr)
-  for (i = 0; i < na; ++i) {
+  for (i = 0; i < nrows; ++i) {
     if (indrows[i] < 0) {
       nerr += 1;
 #ifndef _OPENMP

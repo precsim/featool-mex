@@ -1,0 +1,255 @@
+name: MEX CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "feat/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mex-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifest:
+    name: Manifest and static checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate deterministic target manifest
+        run: python3 ci/check_manifest.py
+      - name: Reject legacy shell dependency discovery
+        run: |
+          if grep -n "grep src_dep" build.m; then
+            echo "build.m must not discover dependencies through grep" >&2
+            exit 1
+          fi
+
+  matlab:
+    name: MATLAB ${{ matrix.platform }}
+    needs: manifest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            release: R2026b
+            platform: linux-x86_64
+            extension: mexa64
+            audit: linux
+            audit_file: linux-ABI.json
+            compiler: ''
+            products: ''
+          - runner: windows-2025
+            release: R2026b
+            platform: windows-x86_64
+            extension: mexw64
+            audit: windows
+            audit_file: windows-ABI.txt
+            compiler: mingw
+            products: MATLAB_Support_for_MinGW-w64_C/C++/Fortran_Compiler
+          - runner: macos-15-intel
+            release: R2025b
+            platform: macos-x86_64
+            extension: mexmaci64
+            audit: macos-x86_64
+            audit_file: macos-ABI.txt
+            compiler: ''
+            products: ''
+          - runner: macos-15
+            release: R2026b
+            platform: macos-arm64
+            extension: mexmaca64
+            audit: macos-arm64
+            audit_file: macos-ABI.txt
+            compiler: ''
+            products: ''
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+          products: ${{ matrix.products }}
+
+      - name: Build serial MEX files and run smoke tests
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            outdir=fullfile(pwd,'dist','matlab','${{ matrix.platform }}');
+            build('outdir',outdir,'openmp',false,'compiler','${{ matrix.compiler }}');
+            smoke_mex(outdir)
+
+      - name: Inspect Linux ELF ABI
+        if: matrix.audit == 'linux'
+        run: >-
+          python3 ci/check_linux_abi.py
+          "dist/matlab/${{ matrix.platform }}"
+          --extensions "${{ matrix.extension }}"
+          --output "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Windows PE ABI
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        run: >-
+          ./ci/check_windows_binary.ps1
+          -Directory "dist/matlab/${{ matrix.platform }}"
+          -ReportFile "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Intel macOS Mach-O ABI
+        if: matrix.audit == 'macos-x86_64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/matlab/${{ matrix.platform }}"
+          x86_64
+          "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Apple silicon macOS Mach-O ABI
+        if: matrix.audit == 'macos-arm64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/matlab/${{ matrix.platform }}"
+          arm64
+          "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Finalize artifact metadata and checksums
+        run: >-
+          python ci/finalize_artifact.py
+          "dist/matlab/${{ matrix.platform }}"
+          --extension "${{ matrix.extension }}"
+          --runtime matlab
+          --platform "${{ matrix.platform }}"
+          --built-with "${{ matrix.release }}"
+          --audit-file "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          --compatibility "modern source build and same-runtime smoke test passed"
+
+      - name: Upload MATLAB artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: matlab-${{ matrix.platform }}-source-ci
+          path: dist/matlab/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  octave:
+    name: Octave ${{ matrix.platform }}
+    needs: manifest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+            octave_cmd: octave
+            audit: linux
+            audit_file: linux-ABI.json
+          - runner: windows-2025
+            platform: windows-x86_64
+            octave_cmd: octave-cli
+            audit: windows
+            audit_file: windows-ABI.txt
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            octave_cmd: octave
+            audit: macos-x86_64
+            audit_file: macos-ABI.txt
+          - runner: macos-15
+            platform: macos-arm64
+            octave_cmd: octave
+            audit: macos-arm64
+            audit_file: macos-ABI.txt
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Octave on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends octave octave-dev
+
+      - name: Install Octave on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install octave --yes --no-progress
+          $octaveCli = Get-ChildItem -LiteralPath 'C:\Program Files\GNU Octave' -Filter octave-cli.exe -Recurse |
+            Select-Object -First 1
+          if (-not $octaveCli) {
+            throw 'octave-cli.exe was not found after Chocolatey installation'
+          }
+          $octaveCli.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Octave on macOS
+        if: runner.os == 'macOS'
+        run: brew install octave
+
+      - name: Show Octave version
+        run: ${{ matrix.octave_cmd }} --version
+
+      - name: Build serial Octave MEX files and run smoke tests
+        run: >-
+          ${{ matrix.octave_cmd }} --no-gui --quiet --eval
+          "addpath(fullfile(pwd,'test'));
+          outdir=fullfile(pwd,'dist','octave','${{ matrix.platform }}');
+          build_octave('outdir',outdir,'openmp',false);
+          smoke_mex(outdir);"
+
+      - name: Inspect Octave Linux ELF ABI
+        if: matrix.audit == 'linux'
+        run: >-
+          python3 ci/check_linux_abi.py
+          "dist/octave/${{ matrix.platform }}"
+          --extensions mex
+          --output "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Octave Windows PE ABI
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        run: >-
+          ./ci/check_windows_binary.ps1
+          -Directory "dist/octave/${{ matrix.platform }}"
+          -ReportFile "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          -AllowCompilerRuntime
+
+      - name: Inspect Octave Intel macOS Mach-O ABI
+        if: matrix.audit == 'macos-x86_64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/octave/${{ matrix.platform }}"
+          x86_64
+          "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Octave Apple silicon macOS Mach-O ABI
+        if: matrix.audit == 'macos-arm64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/octave/${{ matrix.platform }}"
+          arm64
+          "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Finalize artifact metadata and checksums
+        run: >-
+          python ci/finalize_artifact.py
+          "dist/octave/${{ matrix.platform }}"
+          --extension mex
+          --runtime octave
+          --platform "${{ matrix.platform }}"
+          --audit-file "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          --compatibility "modern Octave source build and same-runtime smoke test passed"
+
+      - name: Upload Octave artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: octave-${{ matrix.platform }}-source-ci
+          path: dist/octave/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 14

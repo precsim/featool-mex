@@ -5,7 +5,6 @@
 #include <vector>
 
 #define CHECK_INPUT
-#undef  CHECK_INPUT
 #define ENABLE_PROFILE
 #undef ENABLE_PROFILE
 
@@ -102,7 +101,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         prowLvl = mxGetIr(prhs[1]);        // row indices for elements of A
         pcolindexLvl = mxGetJc(prhs[1]); // index into the columns
         #ifdef CHECK_INPUT
-        if(mxGetN != N || N != mxGetM(prhs[1])) {
+        if(mxGetN(prhs[1]) != N || N != mxGetM(prhs[1])) {
                 mexErrMsgTxt("Input matrix must be square and of order N");
         }
         #endif

@@ -6,12 +6,9 @@
 #include "mex.h"
 #include <stdio.h>
 #include <math.h>
-#include "blas.h"
 #include <string.h>
 #ifdef _OPENMP
 #include <omp.h>
-#else
-#warning "OpenMP not enabled. Compile with mex CSM_assembler_ExtForces.c CFLAGS="\$CFLAGS -fopenmp" LDFLAGS="\$LDFLAGS -fopenmp""
 #endif
 
 
@@ -21,8 +18,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     /* Check for proper number of arguments. */
     if(nrhs!=6) {
         mexErrMsgTxt("6 inputs are required.");
-    } else if(nlhs>2) {
-        mexErrMsgTxt("Too many output arguments.");
+    } else if(nlhs!=2) {
+        mexErrMsgTxt("Exactly 2 output arguments are required.");
     }
     
     double* f   = mxGetPr(prhs[0]);
