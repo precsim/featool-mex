@@ -247,9 +247,12 @@ jobs:
 
       - name: Install Octave on Linux
         if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends octave octave-dev
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends octave octave-dev
 
       - name: Install Octave on Windows
         if: runner.os == 'Windows'
@@ -367,9 +370,12 @@ jobs:
 
       - name: Install current Octave on Linux
         if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends octave
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends octave
 
       - name: Install current Octave on Windows
         if: runner.os == 'Windows'
