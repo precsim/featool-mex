@@ -42,12 +42,17 @@ typedef struct {
 size_t hashsize(size_t len);
 uint32_t hash(const uint8_t *val,size_t nbytes,uint32_t offset);
 uint32_t hash2nd(const uint8_t *val,size_t nbytes);
+uint32_t hashValue(const uint8_t *val,size_t nelems,size_t sizelem,
+                   mxClassID id,uint32_t offset);
+bool valueEqual(const uint8_t *A,const uint8_t *B,size_t nelems,
+                size_t sizelem,mxClassID id);
 bool mx_IsEqual(const mxArray *A,const mxArray *B);
 
 // Venn-topology routines
 void hashSort(hashTable *T,
               const uint8_t *A,size_t Na,
-              const uint8_t *B,size_t Nb,size_t Mbytes);
+              const uint8_t *B,size_t Nb,size_t Mbytes,
+              size_t sizelem,mxClassID id);
 void mxhashSort(mxhashTable *T,
                 const mxArray *A,size_t Na,
                 const mxArray *B,size_t Nb);
@@ -154,8 +159,11 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
       uint32_t *C;
       plhs[0] = mxCreateNumericMatrix(1,Na,mxUINT32_CLASS,mxREAL);
       C = mxGetData(plhs[0]);
+      const size_t sizelem = mxGetElementSize(prhs[1]);
+      const mxClassID id = mxGetClassID(prhs[1]);
+      const size_t nelems = Mbytes/sizelem;
       for (size_t i = 0; i < Na; i++)
-        C[i] = hash(&A[i*Mbytes],Mbytes,0);
+        C[i] = hashValue(&A[i*Mbytes],nelems,sizelem,id,0);
       return;
     }
 
@@ -177,10 +185,12 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
 
     // sort it out!
     hashTable T;
+    const size_t sizelem = mxGetElementSize(prhs[1]);
+    const mxClassID id = mxGetClassID(prhs[1]);
     if (op != ISMEMBER)
-      hashSort(&T,A,Na,B,Nb,Mbytes);
+      hashSort(&T,A,Na,B,Nb,Mbytes,sizelem,id);
     else
-      hashSort(&T,B,Nb,A,Na,Mbytes); // 2nd input must be the master array
+      hashSort(&T,B,Nb,A,Na,Mbytes,sizelem,id); // 2nd input must be the master array
 
     // produce whatever output is asked for
     static const fsetopOut ftab[] = {
@@ -220,10 +230,11 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
       C = mxGetData(plhs[0]);
       for (size_t i = 0; i < Na; i++) {
         const mxArray *Ai = mxGetCell(A,i);
-        uint32_t hashkey =  hash(mxGetData(Ai),mxGetNumberOfElements(Ai)*
-                                 mxGetElementSize(Ai),mxGetClassID(Ai));
+        uint32_t hashkey = hashValue(mxGetData(Ai),mxGetNumberOfElements(Ai),
+                                     mxGetElementSize(Ai),mxGetClassID(Ai),
+                                     mxGetClassID(Ai));
         hashkey = hash((uint8_t *)mxGetDimensions(Ai),
-                       mxGetNumberOfDimensions(Ai)*sizeof(int),hashkey);
+                       mxGetNumberOfDimensions(Ai)*sizeof(mwSize),hashkey);
         C[i] = hashkey;
       }
       return;
@@ -856,6 +867,74 @@ uint32_t hash2nd(const uint8_t *val,size_t nbytes)
   return hash(val,nbytes,0x0f0f0f0f)|1;
 }
 /*------------------------------------------------------------------------*/
+uint32_t hashValue(const uint8_t *val,size_t nelems,size_t sizelem,
+                   mxClassID id,uint32_t offset)
+/* Hash data while canonicalizing the sign bit of floating-point zero. */
+{
+  if (id == mxDOUBLE_CLASS && sizelem == sizeof(double)) {
+    const double *data = (const double *)val;
+    bool has_negative_zero = false;
+    for (size_t i = 0; i < nelems; i++)
+      if (data[i] == 0.0 && signbit(data[i])) {
+        has_negative_zero = true;
+        break;
+      }
+    if (has_negative_zero) {
+      double *copy = mxMalloc(nelems*sizeof(double));
+      memcpy(copy,data,nelems*sizeof(double));
+      for (size_t i = 0; i < nelems; i++)
+        if (copy[i] == 0.0) copy[i] = 0.0;
+      const uint32_t hashkey = hash((const uint8_t *)copy,
+                                    nelems*sizeof(double),offset);
+      mxFree(copy);
+      return hashkey;
+    }
+  }
+  if (id == mxSINGLE_CLASS && sizelem == sizeof(float)) {
+    const float *data = (const float *)val;
+    bool has_negative_zero = false;
+    for (size_t i = 0; i < nelems; i++)
+      if (data[i] == 0.0f && signbit(data[i])) {
+        has_negative_zero = true;
+        break;
+      }
+    if (has_negative_zero) {
+      float *copy = mxMalloc(nelems*sizeof(float));
+      memcpy(copy,data,nelems*sizeof(float));
+      for (size_t i = 0; i < nelems; i++)
+        if (copy[i] == 0.0f) copy[i] = 0.0f;
+      const uint32_t hashkey = hash((const uint8_t *)copy,
+                                    nelems*sizeof(float),offset);
+      mxFree(copy);
+      return hashkey;
+    }
+  }
+
+  return hash(val,nelems*sizelem,offset);
+}
+/*------------------------------------------------------------------------*/
+bool valueEqual(const uint8_t *A,const uint8_t *B,size_t nelems,
+                size_t sizelem,mxClassID id)
+/* Bitwise equality except that +0 and -0 are the same floating value. */
+{
+  if (id == mxDOUBLE_CLASS && sizelem == sizeof(double)) {
+    const double *a = (const double *)A,*b = (const double *)B;
+    for (size_t i = 0; i < nelems; i++)
+      if (!(a[i] == 0.0 && b[i] == 0.0) &&
+          memcmp(&a[i],&b[i],sizeof(double))) return false;
+    return true;
+  }
+  if (id == mxSINGLE_CLASS && sizelem == sizeof(float)) {
+    const float *a = (const float *)A,*b = (const float *)B;
+    for (size_t i = 0; i < nelems; i++)
+      if (!(a[i] == 0.0f && b[i] == 0.0f) &&
+          memcmp(&a[i],&b[i],sizeof(float))) return false;
+    return true;
+  }
+
+  return memcmp(A,B,nelems*sizelem) == 0;
+}
+/*------------------------------------------------------------------------*/
 bool mx_IsEqual(const mxArray *A,const mxArray *B)
 /* Bitwise equality for real non-sparse mxArrays containing data. This
    function will not work properly for sparse arrays, cell-arrays,
@@ -865,15 +944,16 @@ bool mx_IsEqual(const mxArray *A,const mxArray *B)
   if (mxGetClassID(A) != mxGetClassID(B)) return false;
 
   // real data
-  const int nelems = mxGetNumberOfElements(A);
-  const int sizelem = mxGetElementSize(A);
+  const size_t nelems = mxGetNumberOfElements(A);
+  const size_t sizelem = mxGetElementSize(A);
   if (nelems != mxGetNumberOfElements(B)) return false;
-  if (memcmp(mxGetData(A),mxGetData(B),nelems*sizelem)) return false;
+  if (!valueEqual(mxGetData(A),mxGetData(B),nelems,sizelem,
+                  mxGetClassID(A))) return false;
 
   // shape
-  int ndims = mxGetNumberOfDimensions(A);
+  mwSize ndims = mxGetNumberOfDimensions(A);
   if (ndims != mxGetNumberOfDimensions(B)) return false;
-  if (memcmp(mxGetDimensions(A),mxGetDimensions(B),ndims*sizeof(int)))
+  if (memcmp(mxGetDimensions(A),mxGetDimensions(B),ndims*sizeof(mwSize)))
     return false;
 
   return true;
@@ -881,7 +961,8 @@ bool mx_IsEqual(const mxArray *A,const mxArray *B)
 /*------------------------------------------------------------------------*/
 void hashSort(hashTable *T,
               const uint8_t *A,size_t Na,
-              const uint8_t *B,size_t Nb,size_t Mbytes)
+              const uint8_t *B,size_t Nb,size_t Mbytes,
+              size_t sizelem,mxClassID id)
 /* Determines the full Venn-topology of the arrays A and B using
    hashing.
 
@@ -909,18 +990,20 @@ void hashSort(hashTable *T,
 
   // hash columns of A
   for (size_t i = 0; i < Na; i++) {
-    uint32_t hashkey = hash(&A[i*Mbytes],Mbytes,0)&(T->hashsz-1);
+    const size_t nelems = Mbytes/sizelem;
+    uint32_t hashkey = hashValue(&A[i*Mbytes],nelems,sizelem,id,0)&(T->hashsz-1);
 
     // collision?
     if (T->hash_id[hashkey] != '\0' &&
-        memcmp(&A[i*Mbytes],T->hash_tb[hashkey],Mbytes)) {
-      const uint32_t hashkey2nd = hash2nd(&A[i*Mbytes],Mbytes);
+        !valueEqual(&A[i*Mbytes],T->hash_tb[hashkey],nelems,sizelem,id)) {
+      const uint32_t hashkey2nd =
+        hashValue(&A[i*Mbytes],nelems,sizelem,id,0x0f0f0f0f)|1;
 
       // rehash until empty slot found
       do
         hashkey = (hashkey+hashkey2nd)&(T->hashsz-1);
       while (T->hash_id[hashkey] != '\0' &&
-             memcmp(&A[i*Mbytes],T->hash_tb[hashkey],Mbytes));
+             !valueEqual(&A[i*Mbytes],T->hash_tb[hashkey],nelems,sizelem,id));
     }
 
     // fill in table
@@ -936,16 +1019,18 @@ void hashSort(hashTable *T,
 
   // hash columns of B
   for (size_t i = 0; i < Nb; i++) {
-    uint32_t hashkey = hash(&B[i*Mbytes],Mbytes,0)&(T->hashsz-1);
+    const size_t nelems = Mbytes/sizelem;
+    uint32_t hashkey = hashValue(&B[i*Mbytes],nelems,sizelem,id,0)&(T->hashsz-1);
 
     if (T->hash_id[hashkey] != '\0' &&
-        memcmp(&B[i*Mbytes],T->hash_tb[hashkey],Mbytes)) {
-      const uint32_t hashkey2nd = hash2nd(&B[i*Mbytes],Mbytes);
+        !valueEqual(&B[i*Mbytes],T->hash_tb[hashkey],nelems,sizelem,id)) {
+      const uint32_t hashkey2nd =
+        hashValue(&B[i*Mbytes],nelems,sizelem,id,0x0f0f0f0f)|1;
 
       do
         hashkey = (hashkey+hashkey2nd)&(T->hashsz-1);
       while (T->hash_id[hashkey] != '\0' &&
-             memcmp(&B[i*Mbytes],T->hash_tb[hashkey],Mbytes));
+             !valueEqual(&B[i*Mbytes],T->hash_tb[hashkey],nelems,sizelem,id));
     }
 
     if (T->hash_id[hashkey] == '\0') {
@@ -987,8 +1072,9 @@ void mxhashSort(mxhashTable *T,
   for (size_t i = 0; i < Na; i++) {
     // hashing over data and class only...
     const mxArray *Ai = mxGetCell(A,i);
-    uint32_t hashkey = hash(mxGetData(Ai),mxGetNumberOfElements(Ai)*
-                            mxGetElementSize(Ai),mxGetClassID(Ai));
+    uint32_t hashkey = hashValue(mxGetData(Ai),mxGetNumberOfElements(Ai),
+                                 mxGetElementSize(Ai),mxGetClassID(Ai),
+                                 mxGetClassID(Ai));
     hashkey = hashkey&(T->hashsz-1);
 
     if (T->hash_id[hashkey] != '\0' &&
@@ -997,7 +1083,7 @@ void mxhashSort(mxhashTable *T,
       const uint32_t hashkey2nd = hash2nd((const uint8_t *)
                                           mxGetDimensions(Ai),
                                           mxGetNumberOfDimensions(Ai)*
-                                          sizeof(int));
+                                          sizeof(mwSize));
 
       do
         hashkey = (hashkey+hashkey2nd)&(T->hashsz-1);
@@ -1018,8 +1104,9 @@ void mxhashSort(mxhashTable *T,
 
   for (size_t i = 0; i < Nb; i++) {
     const mxArray *Bi = mxGetCell(B,i);
-    uint32_t hashkey = hash(mxGetData(Bi),mxGetNumberOfElements(Bi)*
-                            mxGetElementSize(Bi),mxGetClassID(Bi));
+    uint32_t hashkey = hashValue(mxGetData(Bi),mxGetNumberOfElements(Bi),
+                                 mxGetElementSize(Bi),mxGetClassID(Bi),
+                                 mxGetClassID(Bi));
     hashkey = hashkey&(T->hashsz-1);
 
     if (T->hash_id[hashkey] != '\0' &&
@@ -1027,7 +1114,7 @@ void mxhashSort(mxhashTable *T,
       const uint32_t hashkey2nd = hash2nd((const uint8_t *)
                                           mxGetDimensions(Bi),
                                           mxGetNumberOfDimensions(Bi)*
-                                          sizeof(int));
+                                          sizeof(mwSize));
 
       do
         hashkey = (hashkey+hashkey2nd)&(T->hashsz-1);

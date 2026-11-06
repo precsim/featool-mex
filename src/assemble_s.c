@@ -11,6 +11,7 @@
 #define GRADREFPHI(i,j,k) gradrefphi[i+(j+k*NumQuadPoints)*nln]
 
 #include "src_dep/Tools.h"
+#include "src_dep/mex_size_guard.h"
 #include "src_dep/LinearElasticMaterial.h"
 #include "src_dep/SEMMTMaterial.h"
 #include "src_dep/NeoHookeanMaterial.h"
@@ -141,8 +142,58 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         mexErrMsgTxt("Incorrect number of output arguments for material model.");
     }
 
-    double* dim_ptr = mxGetPr(prhs[0]);
-    int dim     = (int)(dim_ptr[0]);
+    mexRequireIntAddressableInputs(nrhs, prhs);
+    int dim = mexCheckedPositiveIntScalar(prhs[0], "dimension");
+    int nln = mexCheckedPositiveIntScalar(prhs[5], "local node count");
+    int noe = mexCheckedSizeToInt(mxGetN(prhs[4]), "element count");
+    int NumQuadPoints = mexCheckedSizeToInt(mxGetN(prhs[6]), "quadrature point count");
+    int nln2 = mexCheckedMulInt(nln, nln, "local matrix size");
+
+    switch (model) {
+    case MODEL_LINEAR_FORCES:
+    case MODEL_SEMMT_FORCES:
+    case MODEL_STVENANTKIRCHHOFF_FORCES:
+    case MODEL_NEOHOOKEAN_FORCES:
+    case MODEL_RAGHAVANVORP_FORCES:
+        (void)mexCheckedMulInt(mexCheckedMulInt(nln, noe, "force output size"),
+                               dim, "force output size");
+        break;
+    case MODEL_LINEAR_JACOBIAN_SLOW:
+    case MODEL_LINEAR_JACOBIAN:
+    case MODEL_SEMMT_JACOBIAN_SLOW:
+    case MODEL_SEMMT_JACOBIAN:
+    case MODEL_STVENANTKIRCHHOFF_JACOBIAN_SLOW:
+    case MODEL_STVENANTKIRCHHOFF_JACOBIAN:
+    case MODEL_NEOHOOKEAN_JACOBIAN:
+    case MODEL_NEOHOOKEAN_JACOBIAN_SLOW:
+    case MODEL_RAGHAVANVORP_JACOBIAN:
+    case MODEL_RAGHAVANVORP_JACOBIAN_SLOW:
+        (void)mexCheckedMulInt(
+            mexCheckedMulInt(mexCheckedMulInt(nln2, noe, "Jacobian output size"),
+                             dim, "Jacobian output size"),
+            dim, "Jacobian output size");
+        break;
+    case MODEL_LINEAR_STRESS:
+    case MODEL_STVENANTKIRCHHOFF_STRESS:
+    case MODEL_NEOHOOKEAN_STRESS:
+    case MODEL_RAGHAVANVORP_STRESS:
+        (void)mexCheckedMulInt(
+            noe, mexCheckedMulInt(dim, dim, "stress output size"),
+            "stress output size");
+        break;
+    case MODEL_NEOHOOKEAN_PRESTRESS:
+        (void)mexCheckedMulInt(
+            mexCheckedMulInt(mexCheckedMulInt(nln2, noe, "prestress Jacobian output size"),
+                             dim, "prestress Jacobian output size"),
+            dim, "prestress Jacobian output size");
+        (void)mexCheckedMulInt(
+            mexCheckedMulInt(mexCheckedMulInt(noe, NumQuadPoints, "prestress state output size"),
+                             dim, "prestress state output size"),
+            dim, "prestress state output size");
+        break;
+    default:
+        break;
+    }
 
     switch (model) {
     case MODEL_LINEAR_FORCES:
