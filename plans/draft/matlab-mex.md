@@ -1,5 +1,19 @@
 # MATLAB/Octave MEX build and compatibility plan
 
+## Current execution policy
+
+All MATLAB, Octave, and MEX compilation/build/test work for this repository runs
+only on standard GitHub-hosted Actions runners. The self-hosted/preserved-runner
+ideas later in this draft are historical design notes and are not part of the
+active implementation.
+
+The hosted release baseline is R2023a on `ubuntu-22.04` and `windows-2022`,
+R2024b on `macos-15-intel` and `macos-15`, followed by fresh-runner testing
+on newer MATLAB releases. R2011a-compatible source syntax and the legacy Matrix
+API are retained, but the release must not claim an R2011a-tested artifact
+unless a standard GitHub-hosted runner can actually provision and execute that
+runtime.
+
 ## Goal
 
 Build the MEX sources under `src/` on GitHub Actions or attached GitHub Actions runners for:
