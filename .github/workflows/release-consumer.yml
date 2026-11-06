@@ -74,12 +74,6 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Check out the released source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-          path: released-source
-
       - name: Create release download directory
         run: >-
           python -c "from pathlib import Path;
@@ -111,6 +105,22 @@ jobs:
         run: >-
           python ci/verify_checksums.py
           "release-extracted/${{ env.BUNDLE_DIR }}"
+
+      - name: Resolve published bundle source
+        id: bundle-source
+        env:
+          EXPECTED_SOURCE_SHA: >-
+            ${{ github.event_name == 'workflow_run' &&
+            github.event.workflow_run.head_sha || '' }}
+        run: >-
+          python ci/read_bundle_source.py
+          "release-extracted/${{ env.BUNDLE_DIR }}"
+
+      - name: Check out the published bundle source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.bundle-source.outputs.source_sha }}
+          path: released-source
 
       - name: Set up MATLAB consumer runtime
         if: matrix.runtime == 'matlab'
