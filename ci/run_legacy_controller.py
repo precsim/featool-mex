@@ -24,19 +24,24 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    driver = os.environ.get("MEX_LEGACY_BUILD_DRIVER", "mex-legacy-build")
-    resolved = shutil.which(driver)
-    if resolved is None and Path(driver).is_file():
-        resolved = str(Path(driver).resolve())
-    if resolved is None:
-        raise SystemExit(
-            "legacy build controller driver not found. Install 'mex-legacy-build' "
-            "on the controller runner or set MEX_LEGACY_BUILD_DRIVER."
-        )
+    driver = os.environ.get("MEX_LEGACY_BUILD_DRIVER")
+    if driver:
+        resolved = shutil.which(driver)
+        if resolved is None and Path(driver).is_file():
+            resolved = str(Path(driver).resolve())
+        if resolved is None:
+            raise SystemExit(
+                "MEX_LEGACY_BUILD_DRIVER does not resolve to an executable file: "
+                + driver
+            )
+        command = [resolved]
+    else:
+        bundled = Path(__file__).resolve().parent / "legacy" / "controller_driver.py"
+        if not bundled.is_file():
+            raise SystemExit(f"bundled legacy controller driver not found: {bundled}")
+        command = [sys.executable, str(bundled)]
 
-    args.output.mkdir(parents=True, exist_ok=True)
-    command = [
-        resolved,
+    command.extend([
         "--runtime",
         args.runtime,
         "--version",
@@ -46,12 +51,12 @@ def main() -> int:
         "--source",
         str(args.source.resolve()),
         "--output",
-        str(args.output.resolve()),
+        os.path.abspath(os.path.expanduser(str(args.output))),
         "--source-sha",
         args.source_sha,
         "--serial",
         "--smoke-test",
-    ]
+    ])
     print("Invoking preserved compatibility build appliance.")
     proc = subprocess.run(command, check=False)
     if proc.returncode:
