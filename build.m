@@ -233,7 +233,14 @@ try
 catch
 end
 if isempty(value)
-    value = version();
+    full_version = version();
+    token = regexp(full_version, '\(R([0-9][0-9][0-9][0-9][abAB])\)', ...
+        'tokens', 'once');
+    if isempty(token)
+        value = full_version;
+    else
+        value = ['R' lower(token{1})];
+    end
 elseif value(1) ~= 'R' && value(1) ~= 'r'
     value = ['R' value];
 end

@@ -19,8 +19,8 @@ or set `MEX_LEGACY_BUILD_DRIVER` to an executable path. The workflow invokes:
 
 ```text
 mex-legacy-build
-  --runtime matlab
-  --version <MATLAB release>
+  --runtime <matlab|octave>
+  --version <runtime release/version>
   --platform <repository platform tag>
   --source <checked-out repository>
   --output <artifact directory>
@@ -30,14 +30,17 @@ mex-legacy-build
 ```
 
 The driver is responsible for copying the exact checked-out source SHA into the
-preserved appliance, invoking this repository's `build.m` with OpenMP disabled,
-running `test/smoke_mex.m` on that same runtime, and copying the resulting
-artifact directory back to `--output`. It must propagate any build or smoke
-failure as a non-zero exit code.
+preserved appliance, invoking this repository's `build.m` for MATLAB or
+`build_octave.m` for Octave with OpenMP disabled, running
+`test/smoke_mex.m` on that same runtime, and copying the resulting artifact
+directory back to `--output`. It must propagate any build or smoke failure as
+a non-zero exit code.
 
 The driver must set `MEX_SOURCE_SHA` to the supplied `--source-sha` inside
-the build appliance before invoking MATLAB/Octave. Release finalization rejects
-missing or mismatched `BUILD-INFO.json` source provenance.
+the build appliance before invoking MATLAB/Octave. Runtime metadata must come
+from the runtime itself: `build.m` records MATLAB's actual release and
+`build_octave.m` records Octave's actual `version()`. Release finalization
+rejects missing or mismatched source provenance or runtime-version metadata.
 
 Before invoking MATLAB, the appliance should set
 `MEX_COMPILER_DESCRIPTION` and `MEX_LINKER_DESCRIPTION` to versioned
@@ -71,6 +74,25 @@ Expected MATLAB appliances:
 | `linux-x86_64` | R2011a x64 | glibc 2.5-class userspace/sysroot and supported GCC |
 | `macos-x86_64` | R2011a Intel | oldest practical preserved macOS/Xcode combination |
 | `macos-arm64` | R2023b arm64 | preserved supported Apple-silicon macOS environment |
+
+Expected Octave appliances are configured empirically rather than hard-coded in
+the repository. Once the oldest reproducible version on a platform passes the
+full build, same-runtime smoke test, and ABI audit, record that exact
+`version()` value in these repository variables:
+
+- `MEX_OCTAVE_WINDOWS_VERSION`
+- `MEX_OCTAVE_LINUX_VERSION`
+- `MEX_OCTAVE_MACOS_X64_VERSION`
+- `MEX_OCTAVE_MACOS_ARM64_VERSION`
+
+Set `ENABLE_MEX_OCTAVE_RELEASE=true` only after all four controller appliances
+exist. Tag releases require those variables and build Octave artifacts on the
+preserved versions, then forward-test the exact downloaded binaries on current
+GitHub-hosted Octave installations without rebuilding.
+
+Also set `MEX_OCTAVE_LINUX_MAX_GLIBC` to the measured release ceiling (for example
+`2.12` or `2.17`) established by the preserved Linux Octave builder. The
+release audit fails if any target imports a newer GLIBC symbol.
 
 The Windows sources use C99 features including variable-length arrays and
 declarations in `for` initializers. If the compiler officially supported by
