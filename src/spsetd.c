@@ -57,7 +57,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   const mwIndex na = *(jca + ncols);
   double *restrict pa = mxGetPr(a);
   double *restrict pia = mxGetPi(a);
-  if (na < 1) {return;}
+  if (na < 1 && nlhs == 0) {return;}
 
   /* Row pointers */
   int i, ii, j, nerr = 0;

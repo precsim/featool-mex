@@ -64,6 +64,28 @@ S_complex_set = spsetd(S_complex, 1);
 check_equal(full(S_complex_set), [1 0; 5 + 6i 7 + 8i], 0, ...
     'spsetd complex');
 
+caught = false;
+try
+    S_empty_set = spsetd(sparse(2, 2), 1); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', ...
+        'spsetd accepted a requested row without a diagonal entry.');
+end
+
+caught = false;
+try
+    S_empty_set = spsetd(sparse(2, 2), 3); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', ...
+        'spsetd accepted an out-of-bounds row for an empty sparse matrix.');
+end
+
 [L, U, levels] = iluk_Cmex(speye(3), 0);
 check_equal(full(L), eye(3), 1e-12, 'iluk_Cmex L');
 check_equal(full(U), eye(3), 1e-12, 'iluk_Cmex U');

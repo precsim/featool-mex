@@ -526,6 +526,23 @@ jobs:
         with:
           name: mex-release-bundles
           path: bundles
+      - name: Verify release tag still points to validated source
+        run: |
+          remote="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          tag_refs="$(git ls-remote --tags "$remote" "$tag_ref" "$tag_ref^{}")"
+          if [[ -z "$tag_refs" ]]; then
+            echo "Release tag $GITHUB_REF_NAME no longer exists." >&2
+            exit 1
+          fi
+
+          direct_sha="$(awk -v ref="$tag_ref" '$2 == ref { print $1 }' <<<"$tag_refs")"
+          peeled_sha="$(awk -v ref="$tag_ref^{}" '$2 == ref { print $1 }' <<<"$tag_refs")"
+          tag_sha="${peeled_sha:-$direct_sha}"
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Release tag $GITHUB_REF_NAME points to $tag_sha, expected $GITHUB_SHA." >&2
+            exit 1
+          fi
       - name: Attach bundles to GitHub Release
         env:
           GH_TOKEN: "${{ github.token }}"
@@ -541,5 +558,6 @@ jobs:
               bundles/*.zip \
               bundles/SHA256SUMS \
               --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
               --generate-notes
           fi
