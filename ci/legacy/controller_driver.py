@@ -14,6 +14,8 @@ import json
 import os
 import re
 import shutil
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,8 @@ from typing import Any
 
 CONFIG_ENV = "MEX_LEGACY_APPLIANCES_CONFIG"
 SCHEMA_VERSION = 1
+BUILD_TIMEOUT_SECONDS = 65 * 60
+PROBE_TIMEOUT_SECONDS = 5 * 60
 SUPPORTED_RUNTIMES = {"matlab", "octave"}
 SUPPORTED_PLATFORMS = {
     "linux-x86_64",
@@ -256,6 +260,163 @@ def controller_environment(appliance: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+def _terminate_process_tree(proc: subprocess.Popen[Any]) -> None:
+    if os.name == "nt":
+        system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        taskkill = system_root / "System32" / "taskkill.exe"
+        if taskkill.is_file():
+            subprocess.run(
+                [str(taskkill), "/PID", str(proc.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        if proc.poll() is None:
+            proc.kill()
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if proc.poll() is None:
+            proc.kill()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _create_windows_kill_on_close_job(proc: subprocess.Popen[Any]) -> Any:
+    import ctypes
+    from ctypes import wintypes
+
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_uint64),
+            ("WriteOperationCount", ctypes.c_uint64),
+            ("OtherOperationCount", ctypes.c_uint64),
+            ("ReadTransferCount", ctypes.c_uint64),
+            ("WriteTransferCount", ctypes.c_uint64),
+            ("OtherTransferCount", ctypes.c_uint64),
+        ]
+
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+            ("IoInfo", IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ControllerError(f"unable to create Windows process job: {ctypes.WinError(ctypes.get_last_error())}")
+    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    info.BasicLimitInformation.LimitFlags = 0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(
+        job, 9, ctypes.byref(info), ctypes.sizeof(info)
+    ):
+        error = ctypes.WinError(ctypes.get_last_error())
+        kernel32.CloseHandle(job)
+        raise ControllerError(f"unable to configure Windows process job: {error}")
+    process_handle = wintypes.HANDLE(int(proc._handle))
+    if not kernel32.AssignProcessToJobObject(job, process_handle):
+        error = ctypes.WinError(ctypes.get_last_error())
+        kernel32.CloseHandle(job)
+        raise ControllerError(f"unable to assign process to Windows job: {error}")
+    return job
+
+
+def _close_windows_job(job: Any) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle(job)
+
+
+def run_process_tree(
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: int,
+) -> int:
+    kwargs: dict[str, Any] = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(
+        command,
+        env=env,
+        cwd=None if cwd is None else str(cwd),
+        **kwargs,
+    )
+    job = None
+    if os.name == "nt":
+        try:
+            job = _create_windows_kill_on_close_job(proc)
+        except ControllerError:
+            _terminate_process_tree(proc)
+            raise
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if job is not None:
+            _close_windows_job(job)
+            job = None
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        else:
+            _terminate_process_tree(proc)
+        raise
+    else:
+        if job is not None:
+            _close_windows_job(job)
+            job = None
+        else:
+            _terminate_process_tree(proc)
+        return returncode
+    finally:
+        if job is not None:
+            _close_windows_job(job)
+
+
 def _run_checked(command: list[str], failure: str) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         command,
@@ -333,7 +494,18 @@ def run_probe(appliance: dict[str, Any]) -> int:
         "Running non-build appliance probe for "
         f"{appliance['runtime']}:{appliance['version']}:{appliance['platform']}"
     )
-    return subprocess.run(command, check=False, env=env).returncode
+    with tempfile.TemporaryDirectory(prefix="featool-mex-probe-") as temporary:
+        try:
+            return run_process_tree(
+                command,
+                env=env,
+                cwd=Path(temporary),
+                timeout=PROBE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ControllerError(
+                f"probe exceeded {PROBE_TIMEOUT_SECONDS} seconds"
+            ) from exc
 
 
 def _require_build_args(args: argparse.Namespace) -> None:
@@ -418,7 +590,22 @@ def _verify_receipt(
             )
 
 
-def _validate_staging_output(output: Path) -> None:
+def _staging_identity(output: Path) -> tuple[int, int]:
+    try:
+        info = os.lstat(output)
+    except FileNotFoundError as exc:
+        raise ControllerError(f"adapter output directory disappeared: {output}") from exc
+    file_attributes = getattr(info, "st_file_attributes", 0)
+    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if stat.S_ISLNK(info.st_mode) or (file_attributes & reparse_point):
+        raise ControllerError(f"adapter output root may not be a symlink: {output}")
+    if not stat.S_ISDIR(info.st_mode):
+        raise ControllerError(f"adapter output root must be a directory: {output}")
+    return info.st_dev, info.st_ino
+
+
+def _validate_staging_output(output: Path) -> tuple[int, int]:
+    identity = _staging_identity(output)
     entries = list(output.iterdir())
     if not entries:
         raise ControllerError("appliance adapter returned success with an empty output directory")
@@ -429,6 +616,7 @@ def _validate_staging_output(output: Path) -> None:
             raise ControllerError(
                 f"adapter output must be flat regular files only: {item.name}"
             )
+    return identity
 
 
 def _prepare_requested_output(output: Path) -> None:
@@ -439,9 +627,13 @@ def _prepare_requested_output(output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _promote_output(staging: Path, output: Path) -> None:
+def _promote_output(
+    staging: Path, output: Path, expected_identity: tuple[int, int]
+) -> None:
     if output.exists() or output.is_symlink():
         raise ControllerError(f"output path appeared during dispatch: {output}")
+    if _staging_identity(staging) != expected_identity:
+        raise ControllerError("adapter output directory changed after validation")
     os.replace(staging, output)
 
 
@@ -495,9 +687,19 @@ def run_build(args: argparse.Namespace, appliance: dict[str, Any]) -> int:
                 f"{args.runtime}:{args.version}:{args.platform}."
             )
             print(f"Immutable source archive SHA256: {archive_sha256}")
-            proc = subprocess.run(command, check=False, env=env)
-            if proc.returncode:
-                return proc.returncode
+            try:
+                returncode = run_process_tree(
+                    command,
+                    env=env,
+                    cwd=temporary_root,
+                    timeout=BUILD_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise ControllerError(
+                    f"appliance adapter exceeded {BUILD_TIMEOUT_SECONDS} seconds"
+                ) from exc
+            if returncode:
+                return returncode
             _verify_receipt(
                 receipt,
                 args.runtime,
@@ -506,11 +708,11 @@ def run_build(args: argparse.Namespace, appliance: dict[str, Any]) -> int:
                 args.source_sha,
                 archive_sha256,
             )
-            _validate_staging_output(staging_output)
+            staging_identity = _validate_staging_output(staging_output)
             _verify_metadata(
                 staging_output, args.runtime, args.version, args.platform, args.source_sha
             )
-            _promote_output(staging_output, output)
+            _promote_output(staging_output, output, staging_identity)
     return 0
 
 

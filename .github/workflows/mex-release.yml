@@ -20,7 +20,7 @@ jobs:
         if: github.event_name == 'push' && vars.ENABLE_MEX_LEGACY_RELEASE != 'true'
         run: |
           echo "Tag releases require repository variable ENABLE_MEX_LEGACY_RELEASE=true." >&2
-          echo "This prevents jobs from queueing for absent self-hosted controller runners." >&2
+          echo "This prevents controller jobs from being scheduled before infrastructure is enabled." >&2
           exit 1
       - name: Require MATLAB compatibility ABI ceilings
         if: >-
@@ -71,9 +71,65 @@ jobs:
           done
           exit "$missing"
 
+  controller-queue-watchdog:
+    name: Bound release controller queue time
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Cancel if compatibility controllers never start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          targets=(
+            'Compatibility build linux-x86_64'
+            'Compatibility build windows-x86_64'
+            'Compatibility build macos-x86_64'
+            'Compatibility build macos-arm64'
+            'Octave compatibility build linux-x86_64'
+            'Octave compatibility build windows-x86_64'
+            'Octave compatibility build macos-x86_64'
+            'Octave compatibility build macos-arm64'
+          )
+          for attempt in $(seq 1 20); do
+            jobs="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100")"
+            all_started=1
+            for target in "${targets[@]}"; do
+              status="$(jq -r --arg target "$target" \
+                '.jobs[] | select(.name == $target) | .status' \
+                <<<"$jobs" | head -n 1)"
+              case "$status" in
+                in_progress|completed)
+                  ;;
+                queued|requested|pending|waiting|"")
+                  all_started=0
+                  ;;
+                *)
+                  echo "$target has unexpected status: $status" >&2
+                  exit 1
+                  ;;
+              esac
+            done
+            if [[ "$all_started" -eq 1 ]]; then
+              echo "All compatibility controller jobs have started."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Compatibility controller jobs did not all start within five minutes; cancelling this release run." >&2
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"
+          exit 1
+
   compatibility-build:
     name: Compatibility build ${{ matrix.platform }}
     needs: preflight
+    timeout-minutes: 75
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && vars.ENABLE_MEX_LEGACY_RELEASE == 'true')
@@ -232,6 +288,7 @@ jobs:
   octave-compatibility-build:
     name: Octave compatibility build ${{ matrix.platform }}
     needs: preflight
+    timeout-minutes: 75
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && vars.ENABLE_MEX_OCTAVE_RELEASE == 'true')

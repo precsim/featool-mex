@@ -15,9 +15,13 @@ immutable environment). Controller runners use these labels:
 - `self-hosted, mex-controller, macos, arm64`
 
 The repository now includes `ci/legacy/controller_driver.py`, which is the
-default controller-side dispatcher. A controller may still set
-`MEX_LEGACY_BUILD_DRIVER` to replace it with a site-specific executable. The
-workflow invokes either dispatcher with:
+controller-side dispatcher. A controller may still set
+`MEX_LEGACY_BUILD_DRIVER` to use a site-specific executable implementing the
+historical driver contract. That executable is wrapped by
+`ci/legacy/legacy_driver_adapter.py`, so it still receives an existing output
+directory while source provenance, restricted environment forwarding, receipt
+validation, staging validation, and atomic promotion remain enforced by the
+bundled dispatcher. The workflow invokes the driver contract with:
 
 ```text
 mex-legacy-build
@@ -60,6 +64,11 @@ restricted environment and refuses to forward `GITHUB_*` or `ACTIONS_*`
 runner internals. Prefer OS credential stores or provider-specific protected
 configuration over environment credentials where practical.
 
+For the `MEX_LEGACY_BUILD_DRIVER` compatibility path, set
+`MEX_LEGACY_BUILD_DRIVER_PASS_ENV` to a comma-separated list of any additional
+controller-local environment variables that the historical driver requires.
+The same validation and GitHub/ACTIONS forwarding restrictions apply.
+
 Before dispatch, the bundled driver verifies that the checkout's `HEAD` equals
 the requested `--source-sha` and that the tracked worktree and Git index are
 unchanged. It then uses `git archive <source-sha>` to create the only source
@@ -67,6 +76,15 @@ payload supplied to the appliance adapter. The adapter must verify the tarball
 against `--source-archive-sha256`, transfer/unpack that verified payload into
 the preserved appliance, and build from it. The same hash is exposed as
 `MEX_SOURCE_ARCHIVE_SHA256`.
+
+Adapters run from a controller-owned temporary working directory rather than
+the repository checkout. For the historical-driver compatibility path, the
+wrapper creates an isolated detached Git checkout of the requested commit,
+removes its origin, and the compatibility adapter verifies that checkout's
+`git archive` hash against the immutable archive before passing the isolated
+checkout as `--source`. Legacy drivers therefore retain the documented Git
+checkout contract without receiving the workflow checkout through their source
+argument or current working directory.
 
 After the build and same-runtime smoke test pass, the adapter must write the
 JSON file named by `--receipt`. It must echo `runtime`, `version`, `platform`,
@@ -254,9 +272,11 @@ compatibility release:
 - `MEX_MATLAB_R2011A_LINUX_MAX_GCC`
 
 The repository variable `ENABLE_MEX_LEGACY_RELEASE=true` is required before a
-version tag can schedule these controller jobs. This prevents releases from
-silently queueing for absent self-hosted runners. A manual workflow dispatch
-runs the same compatibility builders and validation chain without publishing a
+version tag can schedule these controller jobs. A GitHub-hosted watchdog also
+cancels a release run when all eight MATLAB/Octave controller jobs have not
+started within five minutes, so an offline or mislabeled self-hosted controller
+does not leave a release queued indefinitely. A manual workflow dispatch runs
+the same compatibility builders and validation chain without publishing a
 GitHub Release.
 
 MATLAB licenses and credentials belong in the appliance/controller's protected

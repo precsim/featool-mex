@@ -37,6 +37,9 @@ if ($Processors.Count -eq 0 -or $Processors[0].Architecture -ne 9) {
 
 $RunnerDir = (Resolve-Path -LiteralPath $RunnerDir).Path
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
+if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+    throw "Controller config must be a file: $ConfigPath"
+}
 $ConfigCmd = Join-Path $RunnerDir 'config.cmd'
 if (-not (Test-Path -LiteralPath $ConfigCmd -PathType Leaf)) {
     throw "Expected $ConfigCmd"

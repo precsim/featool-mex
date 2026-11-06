@@ -56,7 +56,7 @@ jobs:
                 echo "$target reached status $status."
                 exit 0
                 ;;
-              queued|"")
+              queued|requested|pending|waiting|"")
                 sleep 15
                 ;;
               *)
