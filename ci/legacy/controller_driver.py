@@ -367,6 +367,20 @@ def _close_windows_job(job: Any) -> None:
     kernel32.CloseHandle(job)
 
 
+def _resume_windows_process(proc: subprocess.Popen[Any]) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.restype = wintypes.LONG
+    status = ntdll.NtResumeProcess(wintypes.HANDLE(int(proc._handle)))
+    if status != 0:
+        raise ControllerError(
+            f"unable to resume Windows process after job assignment: NTSTATUS 0x{status & 0xffffffff:08x}"
+        )
+
+
 def run_process_tree(
     command: list[str],
     *,
@@ -376,7 +390,9 @@ def run_process_tree(
 ) -> int:
     kwargs: dict[str, Any] = {}
     if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004  # CREATE_SUSPENDED
+        )
     else:
         kwargs["start_new_session"] = True
     proc = subprocess.Popen(
@@ -389,8 +405,17 @@ def run_process_tree(
     if os.name == "nt":
         try:
             job = _create_windows_kill_on_close_job(proc)
+            _resume_windows_process(proc)
         except ControllerError:
-            _terminate_process_tree(proc)
+            if job is not None:
+                _close_windows_job(job)
+                job = None
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            else:
+                _terminate_process_tree(proc)
             raise
     try:
         returncode = proc.wait(timeout=timeout)
