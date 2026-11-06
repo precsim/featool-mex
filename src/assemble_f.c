@@ -2098,11 +2098,14 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
         int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
         int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
-        (void)mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
         int local_size = mexCheckedMulInt(
             mexCheckedMulInt(nlnV, nlnV, "local convective matrix size"),
             dim, "local convective matrix size");
         (void)mexCheckedMulInt(noe, local_size, "assembled convective output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[3], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Element connectivity");
 
         AssembleConvective_Oseen(plhs, prhs);
     }
@@ -2120,12 +2123,15 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
         int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
         int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
-        (void)mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
         int nlnV2 = mexCheckedMulInt(nlnV, nlnV, "local convective matrix size");
         int local_size = mexCheckedMulInt(
             mexCheckedMulInt(nlnV2, dim, "local convective matrix size"),
             dim, "local convective matrix size");
         (void)mexCheckedMulInt(noe, local_size, "assembled convective output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[3], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Element connectivity");
 
         AssembleConvective(plhs, prhs);
     }
@@ -2143,12 +2149,15 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
         int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
         int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
-        (void)mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
         int nlnV2 = mexCheckedMulInt(nlnV, nlnV, "local ALE matrix size");
         int local_size = mexCheckedMulInt(
             mexCheckedMulInt(nlnV2, dim, "local ALE matrix size"),
             dim, "local ALE matrix size");
         (void)mexCheckedMulInt(noe, local_size, "assembled ALE output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[3], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Element connectivity");
 
         AssembleConvectiveALE(plhs, prhs);
     }
@@ -2167,14 +2176,22 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
         int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
         int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
-        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
-        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
         int local_rhs = mexCheckedAddInt(
             mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
             nlnP, "local SUPG vector size");
         int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
         (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
         (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_SemiImplicit(plhs, prhs);
     }
@@ -2193,14 +2210,22 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
         int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
         int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
-        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
-        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
         int local_rhs = mexCheckedAddInt(
             mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
             nlnP, "local SUPG vector size");
         int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
         (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
         (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_Implicit(plhs, prhs);
     }
@@ -2219,14 +2244,22 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
         int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
         int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
-        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
-        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
         int local_rhs = mexCheckedAddInt(
             mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
             nlnP, "local SUPG vector size");
         int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
         (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
         (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_ImplicitALE(plhs, prhs);
     }
@@ -2245,14 +2278,22 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
         int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
         int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
-        (void)mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
-        (void)mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
         int local_rhs = mexCheckedAddInt(
             mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
             nlnP, "local SUPG vector size");
         int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
         (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
         (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_ImplicitSteady(plhs, prhs);
     }
