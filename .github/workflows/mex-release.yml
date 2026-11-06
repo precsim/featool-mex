@@ -1,4 +1,4 @@
-name: MEX compatibility release
+name: MEX hosted release
 
 on:
   push:
@@ -15,183 +15,109 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - run: python3 ci/check_manifest.py
-      - name: Require compatibility infrastructure for tag releases
-        if: github.event_name == 'push' && vars.ENABLE_MEX_LEGACY_RELEASE != 'true'
-        run: |
-          echo "Tag releases require repository variable ENABLE_MEX_LEGACY_RELEASE=true." >&2
-          echo "This prevents controller jobs from being scheduled before infrastructure is enabled." >&2
-          exit 1
-      - name: Require MATLAB compatibility ABI ceilings
-        if: >-
-          github.event_name == 'push' ||
-          github.event_name == 'workflow_dispatch'
-        env:
-          MATLAB_R2011A_LINUX_MAX_GLIBCXX: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GLIBCXX }}"
-          MATLAB_R2011A_LINUX_MAX_CXXABI: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_CXXABI }}"
-          MATLAB_R2011A_LINUX_MAX_GCC: "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GCC }}"
-          MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
-          MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
-        run: |
-          missing=0
-          for name in MATLAB_R2011A_LINUX_MAX_GLIBCXX MATLAB_R2011A_LINUX_MAX_CXXABI MATLAB_R2011A_LINUX_MAX_GCC MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET; do
-            if [[ -z "${!name}" ]]; then
-              echo "Missing repository variable: MEX_${name}" >&2
-              missing=1
-            fi
-          done
-          exit "$missing"
-      - name: Require Octave compatibility infrastructure and version floors
-        if: >-
-          github.event_name == 'push' ||
-          github.event_name == 'workflow_dispatch'
-        env:
-          ENABLE_OCTAVE: "${{ vars.ENABLE_MEX_OCTAVE_RELEASE }}"
-          OCTAVE_WINDOWS_VERSION: "${{ vars.MEX_OCTAVE_WINDOWS_VERSION }}"
-          OCTAVE_LINUX_VERSION: "${{ vars.MEX_OCTAVE_LINUX_VERSION }}"
-          OCTAVE_LINUX_MAX_GLIBC: "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBC }}"
-          OCTAVE_LINUX_MAX_GLIBCXX: "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBCXX }}"
-          OCTAVE_LINUX_MAX_CXXABI: "${{ vars.MEX_OCTAVE_LINUX_MAX_CXXABI }}"
-          OCTAVE_LINUX_MAX_GCC: "${{ vars.MEX_OCTAVE_LINUX_MAX_GCC }}"
-          OCTAVE_MACOS_X64_VERSION: "${{ vars.MEX_OCTAVE_MACOS_X64_VERSION }}"
-          OCTAVE_MACOS_ARM64_VERSION: "${{ vars.MEX_OCTAVE_MACOS_ARM64_VERSION }}"
-          OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
-          OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET: "${{ vars.MEX_OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
-        run: |
-          if [[ "$ENABLE_OCTAVE" != "true" ]]; then
-            echo "Octave compatibility releases require ENABLE_MEX_OCTAVE_RELEASE=true." >&2
-            exit 1
-          fi
-          missing=0
-          for name in OCTAVE_WINDOWS_VERSION OCTAVE_LINUX_VERSION OCTAVE_LINUX_MAX_GLIBC OCTAVE_LINUX_MAX_GLIBCXX OCTAVE_LINUX_MAX_CXXABI OCTAVE_LINUX_MAX_GCC OCTAVE_MACOS_X64_VERSION OCTAVE_MACOS_ARM64_VERSION OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET; do
-            if [[ -z "${!name}" ]]; then
-              echo "Missing repository variable: MEX_${name}" >&2
-              missing=1
-            fi
-          done
-          exit "$missing"
+      - name: Validate deterministic target manifest
+        run: python3 ci/check_manifest.py
+      - name: Enforce GitHub-hosted-only release execution
+        run: python3 ci/check_hosted_release.py
 
-  controller-queue-watchdog:
-    name: Bound release controller queue time
-    needs: preflight
-    runs-on: ubuntu-24.04
-    timeout-minutes: 8
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Cancel if compatibility controllers never start
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          targets=(
-            'Compatibility build linux-x86_64'
-            'Compatibility build windows-x86_64'
-            'Compatibility build macos-x86_64'
-            'Compatibility build macos-arm64'
-            'Octave compatibility build linux-x86_64'
-            'Octave compatibility build windows-x86_64'
-            'Octave compatibility build macos-x86_64'
-            'Octave compatibility build macos-arm64'
-          )
-          for attempt in $(seq 1 20); do
-            jobs="$(gh api \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100")"
-            all_started=1
-            for target in "${targets[@]}"; do
-              status="$(jq -r --arg target "$target" \
-                '.jobs[] | select(.name == $target) | .status' \
-                <<<"$jobs" | head -n 1)"
-              case "$status" in
-                in_progress|completed)
-                  ;;
-                queued|requested|pending|waiting|"")
-                  all_started=0
-                  ;;
-                *)
-                  echo "$target has unexpected status: $status" >&2
-                  exit 1
-                  ;;
-              esac
-            done
-            if [[ "$all_started" -eq 1 ]]; then
-              echo "All compatibility controller jobs have started."
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Compatibility controller jobs did not all start within five minutes; cancelling this release run." >&2
-          gh api \
-            --method POST \
-            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"
-          exit 1
-
-  compatibility-build:
-    name: Compatibility build ${{ matrix.platform }}
+  matlab-build:
+    name: MATLAB hosted build ${{ matrix.platform }}
     needs: preflight
     timeout-minutes: 75
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && vars.ENABLE_MEX_LEGACY_RELEASE == 'true')
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: linux-x86_64
-            version: R2011a
+          - runner: ubuntu-22.04
+            release: R2023a
+            platform: linux-x86_64
             extension: mexa64
-            runner: '["self-hosted","mex-controller","linux","x64"]'
-            python_cmd: python3
             audit: linux
             audit_file: linux-ABI.json
-          - platform: windows-x86_64
-            version: R2011a
+            compiler: ''
+          - runner: windows-2022
+            release: R2023a
+            platform: windows-x86_64
             extension: mexw64
-            runner: '["self-hosted","mex-controller","windows","x64"]'
-            python_cmd: python
             audit: windows
             audit_file: windows-ABI.txt
-          - platform: macos-x86_64
-            version: R2011a
+            compiler: mingw
+          - runner: macos-15-intel
+            release: R2024b
+            platform: macos-x86_64
             extension: mexmaci64
-            runner: '["self-hosted","mex-controller","macos","x64"]'
-            python_cmd: python3
             audit: macos-x86_64
             audit_file: macos-ABI.txt
-          - platform: macos-arm64
-            version: R2023b
+            compiler: ''
+          - runner: macos-15
+            release: R2024b
+            platform: macos-arm64
             extension: mexmaca64
-            runner: '["self-hosted","mex-controller","macos","arm64"]'
-            python_cmd: python3
             audit: macos-arm64
             audit_file: macos-ABI.txt
-    runs-on: ${{ fromJSON(matrix.runner) }}
+            compiler: ''
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build in preserved MATLAB appliance and smoke test there
-        run: >-
-          ${{ matrix.python_cmd }} ci/run_legacy_controller.py
-          --runtime matlab
-          --version "${{ matrix.version }}"
-          --platform "${{ matrix.platform }}"
-          --source .
-          --output "dist/matlab/${{ matrix.platform }}"
-          --source-sha "${{ github.sha }}"
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
 
-      - name: Enforce Linux compatibility ABI
+      - name: Install supported MinGW 8.1 on Windows
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        env:
+          MINGW_URL: https://download.qt.io/development_releases/prebuilt/mingw_64/x86_64-8.1.0-release-posix-seh-rt_v6-rev0.7z
+          MINGW_SHA256: 853970527b5de4a55ec8ca4d3fd732c00ae1c69974cc930c82604396d43e79f8
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'mingw-8.1.0.7z'
+          $extractRoot = Join-Path $env:RUNNER_TEMP 'mingw-8.1.0'
+          Invoke-WebRequest -Uri $env:MINGW_URL -OutFile $archive
+
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:MINGW_SHA256) {
+            throw "MinGW archive checksum mismatch: $actualHash"
+          }
+
+          $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "7-Zip was not found at $sevenZip"
+          }
+          & $sevenZip x $archive "-o$extractRoot" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed with exit code $LASTEXITCODE"
+          }
+
+          $mingwRoot = Join-Path $extractRoot 'mingw64'
+          $gcc = Join-Path $mingwRoot 'bin\gcc.exe'
+          if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
+            throw "MinGW GCC was not found at $gcc"
+          }
+
+          "MW_MINGW64_LOC=$mingwRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          (Join-Path $mingwRoot 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $gcc --version
+
+      - name: Build serial MEX files and run same-runtime smoke tests
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            outdir=fullfile(pwd,'dist','matlab','${{ matrix.platform }}');
+            build('outdir',outdir,'openmp',false,'compiler','${{ matrix.compiler }}');
+            smoke_mex(outdir)
+
+      - name: Inspect Linux ELF ABI
         if: matrix.audit == 'linux'
         run: >-
-          ${{ matrix.python_cmd }} ci/check_linux_abi.py
+          python3 ci/check_linux_abi.py
           "dist/matlab/${{ matrix.platform }}"
           --extensions "${{ matrix.extension }}"
-          --max-glibc 2.5
-          --max-glibcxx "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GLIBCXX }}"
-          --max-cxxabi "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_CXXABI }}"
-          --max-gcc "${{ vars.MEX_MATLAB_R2011A_LINUX_MAX_GCC }}"
           --output "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
-      - name: Inspect Windows compatibility binary
+      - name: Inspect Windows PE ABI
         if: matrix.audit == 'windows'
         shell: pwsh
         run: >-
@@ -199,49 +125,46 @@ jobs:
           -Directory "dist/matlab/${{ matrix.platform }}"
           -ReportFile "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
-      - name: Inspect Intel macOS compatibility binary
+      - name: Inspect Intel macOS Mach-O ABI
         if: matrix.audit == 'macos-x86_64'
         run: >-
           bash ci/check_macos_binary.sh
           "dist/matlab/${{ matrix.platform }}"
           x86_64
           "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
-          false
-          "${{ vars.MEX_MATLAB_R2011A_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
 
-      - name: Inspect Apple silicon compatibility binary
+      - name: Inspect Apple silicon macOS Mach-O ABI
         if: matrix.audit == 'macos-arm64'
         run: >-
           bash ci/check_macos_binary.sh
           "dist/matlab/${{ matrix.platform }}"
           arm64
           "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
-          false
-          "${{ vars.MEX_MATLAB_R2023B_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
 
-      - name: Finalize compatibility artifact
+      - name: Finalize hosted MATLAB artifact
         run: >-
-          ${{ matrix.python_cmd }} ci/finalize_artifact.py
+          python ci/finalize_artifact.py
           "dist/matlab/${{ matrix.platform }}"
           --extension "${{ matrix.extension }}"
           --runtime matlab
           --platform "${{ matrix.platform }}"
-          --built-with "${{ matrix.version }}"
+          --built-with "${{ matrix.release }}"
           --audit-file "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
           --source-sha "${{ github.sha }}"
-          --compatibility "${{ matrix.version }} compatibility build, same-runtime smoke test, and binary audit passed"
+          --compatibility "GitHub-hosted ${{ matrix.release }} build, same-runtime smoke test, and binary audit passed"
 
-      - name: Upload immutable compatibility artifact
+      - name: Upload MATLAB release artifact
         uses: actions/upload-artifact@v7
         with:
-          name: matlab-${{ matrix.platform }}-compatibility
+          name: matlab-${{ matrix.platform }}-hosted-release
           path: dist/matlab/${{ matrix.platform }}/
           if-no-files-found: error
           retention-days: 30
 
-  forward-runtime:
-    name: Forward runtime ${{ matrix.platform }}
-    needs: compatibility-build
+  matlab-artifact-validation:
+    name: MATLAB downloaded-artifact validation ${{ matrix.platform }}
+    needs: matlab-build
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -262,10 +185,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download exact compatibility artifact
+      - name: Download exact hosted-build artifact
         uses: actions/download-artifact@v8
         with:
-          name: matlab-${{ matrix.platform }}-compatibility
+          name: matlab-${{ matrix.platform }}-hosted-release
           path: dist/matlab/${{ matrix.platform }}
 
       - name: Verify internal artifact checksums
@@ -273,7 +196,7 @@ jobs:
           python ci/verify_checksums.py
           "dist/matlab/${{ matrix.platform }}"
 
-      - name: Set up forward MATLAB runtime
+      - name: Set up validation MATLAB runtime
         uses: matlab-actions/setup-matlab@v3
         with:
           release: ${{ matrix.release }}
@@ -285,68 +208,88 @@ jobs:
             addpath(fullfile(pwd,'test'));
             smoke_mex(fullfile(pwd,'dist','matlab','${{ matrix.platform }}'))
 
-  octave-compatibility-build:
-    name: Octave compatibility build ${{ matrix.platform }}
+      - name: Verify artifact remains byte-identical after validation
+        run: >-
+          python ci/verify_checksums.py
+          "dist/matlab/${{ matrix.platform }}"
+
+  octave-build:
+    name: Octave hosted build ${{ matrix.platform }}
     needs: preflight
     timeout-minutes: 75
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && vars.ENABLE_MEX_OCTAVE_RELEASE == 'true')
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: linux-x86_64
-            version: "${{ vars.MEX_OCTAVE_LINUX_VERSION }}"
-            runner: '["self-hosted","mex-controller","linux","x64"]'
-            python_cmd: python3
+          - runner: ubuntu-22.04
+            platform: linux-x86_64
+            octave_cmd: octave
             audit: linux
             audit_file: linux-ABI.json
-          - platform: windows-x86_64
-            version: "${{ vars.MEX_OCTAVE_WINDOWS_VERSION }}"
-            runner: '["self-hosted","mex-controller","windows","x64"]'
-            python_cmd: python
+          - runner: windows-2022
+            platform: windows-x86_64
+            octave_cmd: octave-cli
             audit: windows
             audit_file: windows-ABI.txt
-          - platform: macos-x86_64
-            version: "${{ vars.MEX_OCTAVE_MACOS_X64_VERSION }}"
-            runner: '["self-hosted","mex-controller","macos","x64"]'
-            python_cmd: python3
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            octave_cmd: octave
             audit: macos-x86_64
             audit_file: macos-ABI.txt
-          - platform: macos-arm64
-            version: "${{ vars.MEX_OCTAVE_MACOS_ARM64_VERSION }}"
-            runner: '["self-hosted","mex-controller","macos","arm64"]'
-            python_cmd: python3
+          - runner: macos-15
+            platform: macos-arm64
+            octave_cmd: octave
             audit: macos-arm64
             audit_file: macos-ABI.txt
-    runs-on: ${{ fromJSON(matrix.runner) }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build in preserved Octave appliance and smoke test there
-        run: >-
-          ${{ matrix.python_cmd }} ci/run_legacy_controller.py
-          --runtime octave
-          --version "${{ matrix.version }}"
-          --platform "${{ matrix.platform }}"
-          --source .
-          --output "dist/octave/${{ matrix.platform }}"
-          --source-sha "${{ github.sha }}"
+      - name: Install Octave on Linux
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends octave octave-dev
 
-      - name: Inspect Octave Linux compatibility ABI
+      - name: Install Octave on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install octave --yes --no-progress
+          $octaveCli = Get-ChildItem -LiteralPath 'C:\Program Files\GNU Octave' -Filter octave-cli.exe -Recurse |
+            Select-Object -First 1
+          if (-not $octaveCli) {
+            throw 'octave-cli.exe was not found after Chocolatey installation'
+          }
+          $octaveCli.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Octave on macOS
+        if: runner.os == 'macOS'
+        run: brew install octave
+
+      - name: Show Octave version
+        run: ${{ matrix.octave_cmd }} --version
+
+      - name: Build serial Octave MEX files and run same-runtime smoke tests
+        run: >-
+          ${{ matrix.octave_cmd }} --no-gui --quiet --eval
+          "addpath(fullfile(pwd,'test'));
+          outdir=fullfile(pwd,'dist','octave','${{ matrix.platform }}');
+          build_octave('outdir',outdir,'openmp',false);
+          smoke_mex(outdir);"
+
+      - name: Inspect Octave Linux ELF ABI
         if: matrix.audit == 'linux'
         run: >-
-          ${{ matrix.python_cmd }} ci/check_linux_abi.py
+          python3 ci/check_linux_abi.py
           "dist/octave/${{ matrix.platform }}"
           --extensions mex
-          --max-glibc "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBC }}"
-          --max-glibcxx "${{ vars.MEX_OCTAVE_LINUX_MAX_GLIBCXX }}"
-          --max-cxxabi "${{ vars.MEX_OCTAVE_LINUX_MAX_CXXABI }}"
-          --max-gcc "${{ vars.MEX_OCTAVE_LINUX_MAX_GCC }}"
           --output "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
-      - name: Inspect Octave Windows compatibility ABI
+      - name: Inspect Octave Windows PE ABI
         if: matrix.audit == 'windows'
         shell: pwsh
         run: >-
@@ -355,49 +298,45 @@ jobs:
           -ReportFile "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
           -AllowCompilerRuntime
 
-      - name: Inspect Octave Intel macOS compatibility ABI
+      - name: Inspect Octave Intel macOS Mach-O ABI
         if: matrix.audit == 'macos-x86_64'
         run: >-
           bash ci/check_macos_binary.sh
           "dist/octave/${{ matrix.platform }}"
           x86_64
           "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
-          false
-          "${{ vars.MEX_OCTAVE_MACOS_X64_MAX_DEPLOYMENT_TARGET }}"
 
-      - name: Inspect Octave Apple silicon compatibility ABI
+      - name: Inspect Octave Apple silicon macOS Mach-O ABI
         if: matrix.audit == 'macos-arm64'
         run: >-
           bash ci/check_macos_binary.sh
           "dist/octave/${{ matrix.platform }}"
           arm64
           "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
-          false
-          "${{ vars.MEX_OCTAVE_MACOS_ARM64_MAX_DEPLOYMENT_TARGET }}"
 
-      - name: Finalize Octave compatibility artifact
+      - name: Finalize hosted Octave artifact
         run: >-
-          ${{ matrix.python_cmd }} ci/finalize_artifact.py
+          python ci/finalize_artifact.py
           "dist/octave/${{ matrix.platform }}"
           --extension mex
           --runtime octave
           --platform "${{ matrix.platform }}"
-          --built-with "${{ matrix.version }}"
           --audit-file "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
           --source-sha "${{ github.sha }}"
-          --compatibility "Octave ${{ matrix.version }} compatibility build, same-runtime smoke test, and binary audit passed"
+          --compatibility "GitHub-hosted Octave build, same-runtime smoke test, and binary audit passed"
 
-      - name: Upload immutable Octave compatibility artifact
+      - name: Upload Octave release artifact
         uses: actions/upload-artifact@v7
         with:
-          name: octave-${{ matrix.platform }}-compatibility
+          name: octave-${{ matrix.platform }}-hosted-release
           path: dist/octave/${{ matrix.platform }}/
           if-no-files-found: error
           retention-days: 30
 
-  octave-forward-runtime:
-    name: Octave forward runtime ${{ matrix.platform }}
-    needs: octave-compatibility-build
+  octave-artifact-validation:
+    name: Octave downloaded-artifact validation ${{ matrix.platform }}
+    needs: octave-build
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -418,10 +357,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download exact Octave compatibility artifact
+      - name: Download exact hosted-build artifact
         uses: actions/download-artifact@v8
         with:
-          name: octave-${{ matrix.platform }}-compatibility
+          name: octave-${{ matrix.platform }}-hosted-release
           path: dist/octave/${{ matrix.platform }}
 
       - name: Verify internal artifact checksums
@@ -431,9 +370,12 @@ jobs:
 
       - name: Install current Octave on Linux
         if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends octave
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends octave
 
       - name: Install current Octave on Windows
         if: runner.os == 'Windows'
@@ -447,9 +389,12 @@ jobs:
           }
           $octaveCli.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Install current Octave on macOS
+      - name: Install Octave on macOS
         if: runner.os == 'macOS'
         run: brew install octave
+
+      - name: Show validation Octave version
+        run: ${{ matrix.octave_cmd }} --version
 
       - name: Smoke test downloaded Octave artifact without rebuilding
         run: >-
@@ -457,7 +402,7 @@ jobs:
           "addpath(fullfile(pwd,'test'));
           smoke_mex(fullfile(pwd,'dist','octave','${{ matrix.platform }}'));"
 
-      - name: Verify artifact remains byte-identical after forward test
+      - name: Verify artifact remains byte-identical after validation
         run: >-
           python ci/verify_checksums.py
           "dist/octave/${{ matrix.platform }}"
@@ -465,78 +410,71 @@ jobs:
   release-bundle:
     name: Assemble validated release bundles
     needs:
-      - compatibility-build
-      - forward-runtime
-      - octave-compatibility-build
-      - octave-forward-runtime
+      - matlab-artifact-validation
+      - octave-artifact-validation
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download Linux compatibility artifact
+      - name: Download Linux MATLAB artifact
         uses: actions/download-artifact@v8
         with:
-          name: matlab-linux-x86_64-compatibility
+          name: matlab-linux-x86_64-hosted-release
           path: release/matlab-linux-x86_64
-      - name: Download Windows compatibility artifact
+      - name: Download Windows MATLAB artifact
         uses: actions/download-artifact@v8
         with:
-          name: matlab-windows-x86_64-compatibility
+          name: matlab-windows-x86_64-hosted-release
           path: release/matlab-windows-x86_64
-      - name: Download Intel macOS compatibility artifact
+      - name: Download Intel macOS MATLAB artifact
         uses: actions/download-artifact@v8
         with:
-          name: matlab-macos-x86_64-compatibility
+          name: matlab-macos-x86_64-hosted-release
           path: release/matlab-macos-x86_64
-      - name: Download Apple silicon compatibility artifact
+      - name: Download Apple silicon MATLAB artifact
         uses: actions/download-artifact@v8
         with:
-          name: matlab-macos-arm64-compatibility
+          name: matlab-macos-arm64-hosted-release
           path: release/matlab-macos-arm64
 
-      - name: Download Linux Octave compatibility artifact
+      - name: Download Linux Octave artifact
         uses: actions/download-artifact@v8
         with:
-          name: octave-linux-x86_64-compatibility
+          name: octave-linux-x86_64-hosted-release
           path: release/octave-linux-x86_64
-      - name: Download Windows Octave compatibility artifact
+      - name: Download Windows Octave artifact
         uses: actions/download-artifact@v8
         with:
-          name: octave-windows-x86_64-compatibility
+          name: octave-windows-x86_64-hosted-release
           path: release/octave-windows-x86_64
-      - name: Download Intel macOS Octave compatibility artifact
+      - name: Download Intel macOS Octave artifact
         uses: actions/download-artifact@v8
         with:
-          name: octave-macos-x86_64-compatibility
+          name: octave-macos-x86_64-hosted-release
           path: release/octave-macos-x86_64
-      - name: Download Apple silicon Octave compatibility artifact
+      - name: Download Apple silicon Octave artifact
         uses: actions/download-artifact@v8
         with:
-          name: octave-macos-arm64-compatibility
+          name: octave-macos-arm64-hosted-release
           path: release/octave-macos-arm64
 
-      - name: Verify compatibility artifact checksums
+      - name: Verify hosted-build artifact checksums
         run: |
-          python3 ci/verify_checksums.py release/matlab-linux-x86_64
-          python3 ci/verify_checksums.py release/matlab-windows-x86_64
-          python3 ci/verify_checksums.py release/matlab-macos-x86_64
-          python3 ci/verify_checksums.py release/matlab-macos-arm64
-          python3 ci/verify_checksums.py release/octave-linux-x86_64
-          python3 ci/verify_checksums.py release/octave-windows-x86_64
-          python3 ci/verify_checksums.py release/octave-macos-x86_64
-          python3 ci/verify_checksums.py release/octave-macos-arm64
+          for dir in release/matlab-* release/octave-*; do
+            python3 ci/verify_checksums.py "$dir"
+          done
 
-      - name: Record forward-runtime validation
+      - name: Record fresh-runner artifact validation
         env:
           RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         run: |
           for dir in release/matlab-* release/octave-*; do
             {
-              echo "Forward-runtime validation passed."
+              echo "GitHub-hosted downloaded-artifact validation passed."
               echo "Validation workflow: $RUN_URL"
               echo "Source SHA: $GITHUB_SHA"
-              echo "The MEX binaries are byte-identical to the compatibility artifacts tested by the forward-runtime jobs."
-            } > "$dir/FORWARD-VALIDATION.txt"
+              echo "The MEX binaries are byte-identical to the artifacts tested on fresh GitHub-hosted runners."
+            } > "$dir/HOSTED-VALIDATION.txt"
           done
 
       - name: Refresh artifact checksums after validation record
@@ -583,6 +521,7 @@ jobs:
         with:
           name: mex-release-bundles
           path: bundles
+
       - name: Verify release tag still points to validated source
         run: |
           remote="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
@@ -600,6 +539,7 @@ jobs:
             echo "Release tag $GITHUB_REF_NAME points to $tag_sha, expected $GITHUB_SHA." >&2
             exit 1
           fi
+
       - name: Attach bundles to GitHub Release
         env:
           GH_TOKEN: "${{ github.token }}"

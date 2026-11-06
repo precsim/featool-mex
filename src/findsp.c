@@ -19,14 +19,16 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   /* Column index vector (size ncols+1) with last entry equal to nnz. */
   const mwSize ncols = mxGetN(prhs[0]);
   const mwIndex *jc = mxGetJc(prhs[0]);
+  if (sizeof(mwIndex) != 8)
+    mexErrMsgTxt("findsp requires a 64-bit mwIndex build.");
   if (nlhs >= 1) {
     const mwSize dims[] = {1, ncols+1};
     plhs[0] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
-    mxUint64 *p = mxGetData(plhs[0]);
+    mwIndex *p = (mwIndex *) mxGetData(plhs[0]);
     /* for (mwSize i = 0; i < ncols+1; i++) { */
     /*   p[i] = *(jc + i); */
     /* } */
-    memcpy(p, jc, (ncols+1)*sizeof(mxUint64));
+    memcpy(p, jc, (ncols+1)*sizeof(mwIndex));
   }
 
   /* Row index vector */
@@ -35,18 +37,18 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   if (nlhs >= 2) {
     const mwSize dims[] = {1, nnz};
     plhs[1] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
-    mxUint64 *p = mxGetData(plhs[1]);
+    mwIndex *p = (mwIndex *) mxGetData(plhs[1]);
     /* for (mwSize i = 0; i < nnz; i++) { */
     /*   p[i] = *(ir + i); */
     /* } */
-    memcpy(p, ir, nnz*sizeof(mxUint64));
+    memcpy(p, ir, nnz*sizeof(mwIndex));
   }
 
   /* Index vector */
   if (nlhs >= 3) {
     const mwSize dims[] = {1, nnz};
     plhs[2] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
-    mxUint64 *p = mxGetData(plhs[2]);
+    mwIndex *p = (mwIndex *) mxGetData(plhs[2]);
     mwSize i = 0;
     const mwSize nrows = mxGetM(prhs[0]);
     for (mwSize icol = 0; icol < ncols; icol++) {
@@ -58,13 +60,13 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
 
   /* Value vector */
   if (nlhs >= 4) {
-    mxDouble *avals = mxGetPr(prhs[0]);
+    double *avals = mxGetPr(prhs[0]);
     plhs[3] = mxCreateDoubleMatrix(1, nnz, mxREAL);
-    mxDouble *p = mxGetData(plhs[3]);
+    double *p = mxGetPr(plhs[3]);
     /* for (mwSize i = 0; i < nnz; i++) { */
     /*   p[i] = *(avals + i); */
     /* } */
-    memcpy(p, avals, nnz*sizeof(mxDouble));
+    memcpy(p, avals, nnz*sizeof(double));
   }
 
 }
