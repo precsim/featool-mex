@@ -8,8 +8,9 @@ function info = build(varargin)
 %
 %   BUILD(..., 'openmp', true) enables OpenMP for targets that declare
 %   OpenMP support. Baseline/release builds should leave this false.
-%   On macOS, BUILD(..., 'openmproot', DIR) supplies a libomp installation
-%   prefix containing include/ and lib/ directories.
+%   On macOS, BUILD(..., 'openmproot', DIR) supplies an OpenMP header prefix
+%   containing include/, and BUILD(..., 'openmplib', FILE) supplies the
+%   OpenMP runtime already used by MATLAB.
 %
 %   BUILD(..., 'api', 'legacy') selects the separate-complex Matrix API.
 %   On MATLAB versions that understand -R2017b, BUILD passes -R2017b.
@@ -42,6 +43,7 @@ optdef.outdir   = '';
 optdef.target   = 'all';
 optdef.openmp   = false;
 optdef.openmproot = '';
+optdef.openmplib = '';
 optdef.silent   = false;
 optdef.api      = 'legacy';
 optdef.r2018a   = false;
@@ -141,7 +143,7 @@ for i = 1:length(targets)
     if opt.openmp && target.openmp
         args = [args openmp_args(target.language, opt.mx, mexopts_file, ...
             opt.compiler, ~isempty(explicit_mexopts_file), ...
-            opt.openmproot)]; %#ok<AGROW>
+            opt.openmproot, opt.openmplib)]; %#ok<AGROW>
     end
 
     if ~isempty(mexopts_file)
@@ -307,7 +309,7 @@ end
 
 
 function args = openmp_args(language, mx, mexopts, compiler_name, ...
-                            explicit_mexopts, openmp_root)
+                            explicit_mexopts, openmp_root, openmp_lib)
 if explicit_mexopts
     args = {};
     return
@@ -340,13 +342,17 @@ elseif strncmpi(mx, 'mexmac', 6)
             'macOS OpenMP builds require openmproot to point to a libomp installation.');
     end
     include_dir = fullfile(openmp_root, 'include');
-    lib_dir = fullfile(openmp_root, 'lib');
-    if ~exist(include_dir, 'dir') || ~exist(lib_dir, 'dir')
+    if ~exist(include_dir, 'dir')
         error('BUILD:OpenMPMac', ...
-            'openmproot must contain include/ and lib/ directories: %s', openmp_root);
+            'openmproot must contain an include/ directory: %s', openmp_root);
+    end
+    if isempty(openmp_lib) || ~exist(openmp_lib, 'file')
+        error('BUILD:OpenMPMac', ...
+            'macOS OpenMP builds require openmplib to name MATLAB''s OpenMP runtime.');
     end
     compile_flags = ['-Xpreprocessor -fopenmp -I"' include_dir '"'];
-    link_flags = ['-L"' lib_dir '" -Wl,-rpath,"' lib_dir '" -lomp'];
+    lib_dir = fileparts(openmp_lib);
+    link_flags = ['"' openmp_lib '" -Wl,-rpath,"' lib_dir '"'];
     if strcmpi(language, 'cpp')
         args = {['CXXFLAGS=$CXXFLAGS ' compile_flags], ...
                 ['LDFLAGS=$LDFLAGS ' link_flags]};

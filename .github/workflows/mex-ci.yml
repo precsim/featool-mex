@@ -206,11 +206,24 @@ jobs:
           release: ${{ matrix.release }}
           products: ${{ matrix.products }}
 
-      - name: Install macOS OpenMP runtime
+      - name: Configure macOS OpenMP toolchain
         if: runner.os == 'macOS'
         run: |
           brew install libomp
           echo "OPENMP_ROOT=$(brew --prefix libomp)" >> "$GITHUB_ENV"
+          matlab_bin="$(python3 -c 'import os, shutil; print(os.path.realpath(shutil.which("matlab")))')"
+          matlab_root="$(cd "$(dirname "$matlab_bin")/.." && pwd -P)"
+          matlab_openmp="$(find "$matlab_root" -type f -name 'libomp.dylib' -print -quit)"
+          if [[ -z "$matlab_openmp" ]]; then
+            matlab_openmp="$(find "$matlab_root" -type f -name 'libiomp5.dylib' -print -quit)"
+          fi
+          if [[ -z "$matlab_openmp" ]]; then
+            echo "MATLAB OpenMP runtime was not found under $matlab_root" >&2
+            exit 1
+          fi
+          echo "MATLAB_OPENMP_LIB=$matlab_openmp" >> "$GITHUB_ENV"
+          file "$matlab_openmp"
+          otool -D "$matlab_openmp"
 
       - name: Build OpenMP MEX files and run limited-team smoke tests
         uses: matlab-actions/run-command@v3
@@ -222,7 +235,7 @@ jobs:
           command: >-
             addpath(fullfile(pwd,'test'));
             outdir=fullfile(pwd,'dist','matlab-openmp','${{ matrix.platform }}');
-            build('outdir',outdir,'openmp',true,'compiler','${{ matrix.compiler }}','openmproot',getenv('OPENMP_ROOT'));
+            build('outdir',outdir,'openmp',true,'compiler','${{ matrix.compiler }}','openmproot',getenv('OPENMP_ROOT'),'openmplib',getenv('MATLAB_OPENMP_LIB'));
             smoke_mex(outdir)
 
       - name: Inspect macOS OpenMP Mach-O binaries
