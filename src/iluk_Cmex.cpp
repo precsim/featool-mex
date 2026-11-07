@@ -1,18 +1,17 @@
 #include "mex.h"
 #include "src_dep/iluk_helper.h"
 #include <algorithm>
+#include <climits>
+#include <cmath>
 #include <ctime>
 #include <utility>
 #include <vector>
 
-#define CHECK_INPUT
-#undef  CHECK_INPUT
 #define ENABLE_PROFILE
 #undef ENABLE_PROFILE
 
 using std::inplace_merge;
 using std::max;
-using std::min;
 using std::pair;
 using std::upper_bound;
 using std::vector;
@@ -82,39 +81,38 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         double *L, *U;
 
     // check input and output
-        #ifdef CHECK_INPUT
         if (nrhs != 2) {
            mexErrMsgTxt("Two input arguments required");
         }
         if (nlhs < 2 || nlhs > 3) {
            mexErrMsgTxt("Number of outputs must be between two and three");
         }
-        #endif
 
     // sparse matrix A
-        #ifdef CHECK_INPUT
-        if (!(mxIsSparse(prhs[0])) || mxIsComplex(prhs[0]) || mxIsEmpty(prhs[0])) {
-        mexErrMsgTxt("Input matrix must be nonempty, real, and sparse");
+        if (!(mxIsSparse(prhs[0])) || !(mxIsDouble(prhs[0])) ||
+                mxIsComplex(prhs[0]) || mxIsEmpty(prhs[0])) {
+        mexErrMsgTxt("Input matrix must be nonempty, real, sparse, and double");
         }
-        #endif
         A = mxGetPr(prhs[0]);              // real vector for A
         prowA = mxGetIr(prhs[0]);          // row indices for elements of A
         pcolindexA = mxGetJc(prhs[0]); // index into the columns
         N = mxGetN(prhs[0]);           // number of columns of A
-        #ifdef CHECK_INPUT
         if(N != mxGetM(prhs[0])) {
                 mexErrMsgTxt("Input matrix must be square");
         }
-        #endif
 
         // fill level lfil
-        lfil = static_cast<int>(mxGetScalar(prhs[1]));
-        ++lfil; // use a shifted level of fill
-        #ifdef CHECK_INPUT
-        if(lfil < 0) {
-                mexErrMsgTxt("Fill level must be at least 0");
+        if (!(mxIsNumeric(prhs[1])) || mxIsComplex(prhs[1]) ||
+                mxGetNumberOfElements(prhs[1]) != 1) {
+                mexErrMsgTxt("Fill level must be a real numeric scalar");
         }
-        #endif
+        double lfil_value = mxGetScalar(prhs[1]);
+        if (lfil_value != lfil_value || lfil_value < 0.0 ||
+                lfil_value > static_cast<double>(INT_MAX - 1) ||
+                lfil_value != std::floor(lfil_value)) {
+                mexErrMsgTxt("Fill level must be a finite nonnegative integer that fits in int");
+        }
+        lfil = static_cast<int>(lfil_value) + 1; // use a shifted level of fill
 
         // level data structure: 0 <= level[i][j] <= lfil is the level of fill for
         // permitted fill-in entries
@@ -158,13 +156,16 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         c_vitr itrk = upper_bound(level[i].begin(), level[i].end(), i, comp_first_greater);
                         mwIndex nzmax_old = nzmax;
                         while(itrk != level[i].end()) {
-                                int weight = work_lev[i] + itrk->second;
+                                double weight = static_cast<double>(work_lev[i]) +
+                                                static_cast<double>(itrk->second);
                                 // is (i, itrk->first) already a fill-in?
                                 if(work_lev[itrk->first] != 0) {
-                                        work_lev[itrk->first] = min(weight, work_lev[itrk->first]);
+                                        if(weight < static_cast<double>(work_lev[itrk->first])) {
+                                                work_lev[itrk->first] = static_cast<int>(weight);
+                                        }
                                 }
-                                else if(weight <= lfil) {
-                                        work_lev[itrk->first] = weight;
+                                else if(weight <= static_cast<double>(lfil)) {
+                                        work_lev[itrk->first] = static_cast<int>(weight);
                                         work_idx[nzmax++] = itrk->first;
                                 }
                                 ++itrk;
@@ -212,7 +213,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 U[j] = A[j];
         }
         // check that first nonzero in first row of U is a diagonal element
-        if(prowU[0] != 0) {
+        if(pcolindexU[0] == pcolindexU[1] || prowU[pcolindexU[0]] != 0 ||
+                U[pcolindexU[0]] == 0.0) {
                 mexErrMsgTxt("U has zero diagonal element");
         }
         pcolindexL[0] = 0;
@@ -241,7 +243,13 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 }
                 c_vitr itr = level[j].begin();
                 while(itr != level[j].end() && itr->first < j) {
-                        double alpha = work[itr->first] / U[pcolindexU[itr->first]];
+                        mwIndex pivot_row = itr->first;
+                        mwIndex pivot_start = pcolindexU[pivot_row];
+                        mwIndex pivot_end = pcolindexU[pivot_row + 1];
+                        if(pivot_start == pivot_end || prowU[pivot_start] != pivot_row || U[pivot_start] == 0.0) {
+                                mexErrMsgTxt("U has zero diagonal element");
+                        }
+                        double alpha = work[pivot_row] / U[pivot_start];
                         work[itr->first] = alpha;
                         for(mwIndex k = pcolindexU[itr->first] + 1; k != pcolindexU[itr->first + 1]; ++k) {
                                 // is prowU[k] a permitted fill-in?
@@ -275,14 +283,14 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         work_lev[itr->first] = 0;
                         ++itr;
                 }
+                pcolindexU[j + 1] = nnzU;
                 // check that first nonzero in row j of U is a diagonal element
-                if(prowU[pcolindexU[j]] != j) {
+                if(pcolindexU[j] == pcolindexU[j + 1] || prowU[pcolindexU[j]] != j) {
                         mexErrMsgTxt("U has a zero diagonal element");
                 }
                 L[nnzL] = 1.0;
                 prowL[nnzL++] = j;
                 pcolindexL[j + 1] = nnzL;
-                pcolindexU[j + 1] = nnzU;
         }
         } // artificial scope to force destruction of work object
         #ifdef ENABLE_PROFILE

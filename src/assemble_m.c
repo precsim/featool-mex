@@ -6,12 +6,10 @@
 #include "mex.h"
 #include <stdio.h>
 #include <math.h>
-#include "blas.h"
 #include <string.h>
+#include "src_dep/mex_size_guard.h"
 #ifdef _OPENMP
     #include <omp.h>
-#else
-    #warning "OpenMP not enabled. Compile with mex ADR_assembler_C_omp.c CFLAGS="\$CFLAGS -fopenmp" LDFLAGS="\$LDFLAGS -fopenmp""
 #endif
 
 void mexFunction(int nlhs,mxArray* plhs[], int nrhs, const mxArray* prhs[])
@@ -20,22 +18,22 @@ void mexFunction(int nlhs,mxArray* plhs[], int nrhs, const mxArray* prhs[])
     /* Check for proper number of arguments. */
     if(nrhs!=6) {
         mexErrMsgTxt("6 inputs are required.");
-    } else if(nlhs>3) {
-        mexErrMsgTxt("Too many output arguments.");
+    } else if(nlhs!=3) {
+        mexErrMsgTxt("Exactly 3 output arguments are required.");
     }
+    mexRequireIntAddressableInputs(nrhs, prhs);
 
-    double* dim_ptr = mxGetPr(prhs[0]);
-    int dim     = (int)(dim_ptr[0]);
-    int noe     = mxGetN(prhs[1]);
-    double* nln_ptr = mxGetPr(prhs[2]);
-    int nln     = (int)(nln_ptr[0]);
-    int numRowsElements  = mxGetM(prhs[1]);
-    int nln2    = nln*nln;
+    int dim     = mexCheckedPositiveIntScalar(prhs[0], "dimension");
+    int noe     = mexCheckedSizeToInt(mxGetN(prhs[1]), "element count");
+    int nln     = mexCheckedPositiveIntScalar(prhs[2], "local node count");
+    int numRowsElements = mexCheckedSizeToInt(mxGetM(prhs[1]), "element row count");
+    int nln2    = mexCheckedMulInt(nln, nln, "local matrix size");
+    int output_size = mexCheckedMulInt(nln2, noe, "assembled matrix output size");
     
     /**/
-    plhs[0] = mxCreateDoubleMatrix(nln2*noe,1, mxREAL); 
-    plhs[1] = mxCreateDoubleMatrix(nln2*noe,1, mxREAL); 
-    plhs[2] = mxCreateDoubleMatrix(nln2*noe,1, mxREAL);
+    plhs[0] = mxCreateDoubleMatrix(output_size,1, mxREAL);
+    plhs[1] = mxCreateDoubleMatrix(output_size,1, mxREAL);
+    plhs[2] = mxCreateDoubleMatrix(output_size,1, mxREAL);
     
     double* myMrows    = mxGetPr(plhs[0]);
     double* myMcols    = mxGetPr(plhs[1]);
@@ -44,7 +42,7 @@ void mexFunction(int nlhs,mxArray* plhs[], int nrhs, const mxArray* prhs[])
     /* Local mass matrix (computed only once) with quadrature nodes */
     double LocalMass[nln][nln];
     int q;
-    int NumQuadPoints     = mxGetN(prhs[3]);
+    int NumQuadPoints = mexCheckedSizeToInt(mxGetN(prhs[3]), "quadrature point count");
     
     double* w   = mxGetPr(prhs[3]);
     double* detjac = mxGetPr(prhs[4]);

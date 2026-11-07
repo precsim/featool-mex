@@ -2,9 +2,10 @@ function [L, U, levs] = iluk(A, lfil, Lvl)
 %ILUK Incomplete LU-factorization with fill level k
 %
 %	[L, U] = iluk(A, lfil) computes an Incomplete LU factorization of the
-%   matrix A with level of fill lfil. The matrix A is expected to be 
-%   sparse, real, and square. The parameter lfil can be any nonnegative
-%   integer. L and U are the lower and upper triangular matrices, 
+%   matrix A with level of fill lfil. The matrix A is expected to be
+%   sparse, real, double, and square. The parameter lfil must be a finite
+%   nonnegative integer no greater than 2147483646. L and U are the lower
+%   and upper triangular matrices,
 %   respectively, of the incomplete factorization.
 %
 %   The algorithm proceeds in two phases. In the first phase (symbolic) 
@@ -41,12 +42,18 @@ if(nargin < 2 || nargin > 3)
 	error('Wrong number of inputs');
 end
     
-if(isempty(A) || ~isreal(A) || ~issparse(A) || size(A,1) ~= size(A,2))
-    error('Matrix A must be nonempty, square, sparse, and real');
+if(isempty(A) || ~isa(A, 'double') || ~isreal(A) || ~issparse(A) || size(A,1) ~= size(A,2))
+    error('Matrix A must be nonempty, square, sparse, real, and double');
 end
 
-if(nargin == 2 && (lfil < 0 || lfil ~= floor(lfil)))
-    error('Level of fill must be a nonnegative integer');
+if(nargin == 2)
+    if(~isnumeric(lfil) || ~isreal(lfil) || ~isscalar(lfil))
+        error('Level of fill must be a real numeric scalar');
+    end
+    lfil = double(lfil);
+    if(lfil ~= lfil || lfil < 0 || lfil > 2147483646 || lfil ~= floor(lfil))
+        error('Level of fill must be a finite nonnegative integer no greater than 2147483646');
+    end
 end
 
 if(nargin == 3 && nargout == 3)
@@ -54,8 +61,8 @@ if(nargin == 3 && nargout == 3)
 end
 
 if(nargin == 3)
-    if(isempty(Lvl) || ~isreal(Lvl) || ~issparse(Lvl) || size(Lvl,1) ~= size(Lvl,2))
-		error('Matrix Lvl must be nonempty, square, sparse, and real');
+    if(isempty(Lvl) || ~isa(Lvl, 'double') || ~isreal(Lvl) || ~issparse(Lvl) || size(Lvl,1) ~= size(Lvl,2))
+		error('Matrix Lvl must be nonempty, square, sparse, real, and double');
     end
 	if(size(Lvl,1) ~= size(A,1))
 		error('Matrix Lvl must be the same size as A');
