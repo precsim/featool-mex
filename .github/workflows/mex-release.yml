@@ -242,6 +242,208 @@ jobs:
           python ci/verify_checksums.py
           "dist/matlab/${{ matrix.platform }}"
 
+  matlab-openmp-build:
+    name: MATLAB OpenMP hosted build ${{ matrix.platform }}
+    needs: preflight
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            release: R2026b
+            platform: linux-x86_64
+            extension: mexa64
+            audit: linux
+            audit_file: linux-ABI.json
+            compiler: ''
+            products: ''
+            compatibility: Experimental OpenMP build on MATLAB R2026b; same-runtime limited-team smoke test and binary audit passed
+          - runner: windows-2025
+            release: R2026b
+            platform: windows-x86_64
+            extension: mexw64
+            audit: windows
+            audit_file: windows-ABI.txt
+            compiler: mingw
+            products: MATLAB_Support_for_MinGW-w64_C/C++/Fortran_Compiler
+            compatibility: Experimental OpenMP build on MATLAB R2026b with MinGW support package; same-runtime limited-team smoke test and binary audit passed
+          - runner: macos-15-intel
+            release: R2025b
+            platform: macos-x86_64
+            extension: mexmaci64
+            audit: macos-x86_64
+            audit_file: macos-ABI.txt
+            compiler: ''
+            products: ''
+            mac_arch: x86_64
+            openmp_runtime: libiomp5.dylib
+            compatibility: Experimental OpenMP build on MATLAB R2025b using MATLAB libiomp5; same-runtime limited-team smoke test and binary audit passed
+          - runner: macos-15
+            release: R2026b
+            platform: macos-arm64
+            extension: mexmaca64
+            audit: macos-arm64
+            audit_file: macos-ABI.txt
+            compiler: ''
+            products: ''
+            mac_arch: arm64
+            openmp_runtime: libomp.dylib
+            compatibility: Experimental OpenMP build on MATLAB R2026b using MATLAB libomp; same-runtime limited-team smoke test and binary audit passed
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+          products: ${{ matrix.products }}
+
+      - name: Configure macOS OpenMP toolchain
+        if: runner.os == 'macOS'
+        run: |
+          brew install libomp
+          echo "OPENMP_ROOT=$(brew --prefix libomp)" >> "$GITHUB_ENV"
+          matlab_bin="$(python3 -c 'import os, shutil; print(os.path.realpath(shutil.which("matlab")))')"
+          matlab_root="$(cd "$(dirname "$matlab_bin")/.." && pwd -P)"
+          runtime_name="${{ matrix.openmp_runtime }}"
+          matlab_openmp="$(find "$matlab_root" -type f -name "$runtime_name" -print -quit)"
+          if [[ -z "$matlab_openmp" ]]; then
+            echo "MATLAB OpenMP runtime $runtime_name was not found under $matlab_root" >&2
+            exit 1
+          fi
+          echo "MATLAB_OPENMP_LIB=$matlab_openmp" >> "$GITHUB_ENV"
+          file "$matlab_openmp"
+          otool -D "$matlab_openmp"
+
+      - name: Build OpenMP MEX files and run limited-team smoke tests
+        uses: matlab-actions/run-command@v3
+        env:
+          OMP_DYNAMIC: 'FALSE'
+          OMP_NUM_THREADS: '8'
+          OMP_THREAD_LIMIT: '2'
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            outdir=fullfile(pwd,'dist','matlab-openmp','${{ matrix.platform }}');
+            build('outdir',outdir,'openmp',true,'compiler','${{ matrix.compiler }}','openmproot',getenv('OPENMP_ROOT'),'openmplib',getenv('MATLAB_OPENMP_LIB'));
+            smoke_mex(outdir)
+
+      - name: Inspect OpenMP Linux ELF ABI
+        if: matrix.audit == 'linux'
+        run: >-
+          python3 ci/check_linux_abi.py
+          "dist/matlab-openmp/${{ matrix.platform }}"
+          --extensions "${{ matrix.extension }}"
+          --allow-openmp
+          --output "dist/matlab-openmp/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect OpenMP Windows PE ABI
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        run: >-
+          ./ci/check_windows_binary.ps1
+          -Directory "dist/matlab-openmp/${{ matrix.platform }}"
+          -ReportFile "dist/matlab-openmp/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          -AllowOpenMP
+          -AllowCompilerRuntime
+
+      - name: Inspect OpenMP macOS Mach-O ABI
+        if: runner.os == 'macOS'
+        run: |
+          bash ci/check_macos_binary.sh \
+            "dist/matlab-openmp/${{ matrix.platform }}" \
+            "${{ matrix.mac_arch }}" \
+            "dist/matlab-openmp/${{ matrix.platform }}/${{ matrix.audit_file }}" \
+            true
+          if grep -F "$RUNNER_TOOL_CACHE" "dist/matlab-openmp/${{ matrix.platform }}/${{ matrix.audit_file }}"; then
+            echo "macOS OpenMP MEX embeds a runner-specific tool-cache path" >&2
+            exit 1
+          fi
+
+      - name: Finalize hosted MATLAB OpenMP artifact
+        run: >-
+          python ci/finalize_artifact.py
+          "dist/matlab-openmp/${{ matrix.platform }}"
+          --extension "${{ matrix.extension }}"
+          --runtime matlab
+          --platform "${{ matrix.platform }}"
+          --built-with "${{ matrix.release }}"
+          --audit-file "dist/matlab-openmp/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          --source-sha "${{ github.sha }}"
+          --openmp enabled
+          --compatibility "${{ matrix.compatibility }}"
+
+      - name: Upload MATLAB OpenMP release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: matlab-${{ matrix.platform }}-openmp-hosted-release
+          path: dist/matlab-openmp/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 3
+
+  matlab-openmp-artifact-validation:
+    name: MATLAB OpenMP downloaded-artifact validation ${{ matrix.platform }}
+    needs: matlab-openmp-build
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            release: R2026b
+            platform: linux-x86_64
+            products: ''
+          - runner: windows-2025
+            release: R2026b
+            platform: windows-x86_64
+            products: MATLAB_Support_for_MinGW-w64_C/C++/Fortran_Compiler
+          - runner: macos-15-intel
+            release: R2025b
+            platform: macos-x86_64
+            products: ''
+          - runner: macos-15
+            release: R2026b
+            platform: macos-arm64
+            products: ''
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download exact hosted OpenMP artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-${{ matrix.platform }}-openmp-hosted-release
+          path: dist/matlab-openmp/${{ matrix.platform }}
+
+      - name: Verify internal OpenMP artifact checksums
+        run: >-
+          python ci/verify_checksums.py
+          "dist/matlab-openmp/${{ matrix.platform }}"
+
+      - name: Set up validation MATLAB runtime
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+          products: ${{ matrix.products }}
+
+      - name: Smoke test downloaded OpenMP artifact without rebuilding
+        uses: matlab-actions/run-command@v3
+        env:
+          OMP_DYNAMIC: 'FALSE'
+          OMP_NUM_THREADS: '8'
+          OMP_THREAD_LIMIT: '2'
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            smoke_mex(fullfile(pwd,'dist','matlab-openmp','${{ matrix.platform }}'))
+
+      - name: Verify OpenMP artifact remains byte-identical after validation
+        run: >-
+          python ci/verify_checksums.py
+          "dist/matlab-openmp/${{ matrix.platform }}"
+
   octave-build:
     name: Octave hosted build ${{ matrix.platform }}
     needs: preflight
@@ -440,6 +642,7 @@ jobs:
     name: Assemble validated release bundles
     needs:
       - matlab-artifact-validation
+      - matlab-openmp-artifact-validation
       - octave-artifact-validation
     runs-on: ubuntu-24.04
     steps:
@@ -465,6 +668,27 @@ jobs:
         with:
           name: matlab-macos-arm64-hosted-release
           path: release/matlab-macos-arm64
+
+      - name: Download Linux MATLAB OpenMP artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-linux-x86_64-openmp-hosted-release
+          path: release/matlab-linux-x86_64-openmp
+      - name: Download Windows MATLAB OpenMP artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-windows-x86_64-openmp-hosted-release
+          path: release/matlab-windows-x86_64-openmp
+      - name: Download Intel macOS MATLAB OpenMP artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-macos-x86_64-openmp-hosted-release
+          path: release/matlab-macos-x86_64-openmp
+      - name: Download Apple silicon MATLAB OpenMP artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-macos-arm64-openmp-hosted-release
+          path: release/matlab-macos-arm64-openmp
 
       - name: Download Linux Octave artifact
         uses: actions/download-artifact@v8

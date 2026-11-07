@@ -351,8 +351,11 @@ elseif strncmpi(mx, 'mexmac', 6)
             'macOS OpenMP builds require openmplib to name MATLAB''s OpenMP runtime.');
     end
     compile_flags = ['-Xpreprocessor -fopenmp -I"' include_dir '"'];
-    lib_dir = fileparts(openmp_lib);
-    link_flags = ['"' openmp_lib '" -Wl,-rpath,"' lib_dir '"'];
+    % Link the MATLAB-owned runtime by path so the linker sees the library,
+    % but do not embed its build-host directory as an LC_RPATH. The runtime's
+    % install name is @rpath/lib*.dylib and MATLAB already has the matching
+    % OpenMP runtime loaded in-process before a MEX file is loaded.
+    link_flags = ['"' openmp_lib '"'];
     if strcmpi(language, 'cpp')
         args = {['CXXFLAGS=$CXXFLAGS ' compile_flags], ...
                 ['LDFLAGS=$LDFLAGS ' link_flags]};

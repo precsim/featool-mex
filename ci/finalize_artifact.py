@@ -26,6 +26,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compatibility", default="build-runtime smoke test passed")
     parser.add_argument("--source-sha")
     parser.add_argument("--built-with")
+    parser.add_argument(
+        "--openmp",
+        choices=("disabled", "enabled"),
+        default="disabled",
+        help="expected OpenMP state recorded in BUILD-INFO.json",
+    )
     return parser.parse_args()
 
 
@@ -78,8 +84,12 @@ def main() -> int:
         raise SystemExit(
             f"BUILD-INFO arch={metadata.get('arch')!r}, expected {args.platform!r}"
         )
-    if metadata.get("openmp") is not False:
-        raise SystemExit("baseline artifact must have openmp=false")
+    expected_openmp = args.openmp == "enabled"
+    if metadata.get("openmp") is not expected_openmp:
+        raise SystemExit(
+            f"BUILD-INFO openmp={metadata.get('openmp')!r}, "
+            f"expected {expected_openmp!r}"
+        )
     if metadata.get("mex_extension") != extension:
         raise SystemExit(
             f"BUILD-INFO mex_extension={metadata.get('mex_extension')!r}, "
@@ -176,7 +186,7 @@ def main() -> int:
         f"Runtime: {args.runtime}\n"
         f"Platform: {args.platform}\n"
         f"Status: {args.compatibility}\n"
-        "OpenMP: disabled\n",
+        f"OpenMP: {args.openmp}\n",
         encoding="utf-8",
     )
 

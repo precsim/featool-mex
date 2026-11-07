@@ -240,12 +240,16 @@ jobs:
 
       - name: Inspect macOS OpenMP Mach-O binaries
         if: runner.os == 'macOS'
-        run: >-
-          bash ci/check_macos_binary.sh
-          "dist/matlab-openmp/${{ matrix.platform }}"
-          "${{ matrix.mac_arch }}"
-          "dist/matlab-openmp/${{ matrix.platform }}/macos-ABI.txt"
-          true
+        run: |
+          bash ci/check_macos_binary.sh \
+            "dist/matlab-openmp/${{ matrix.platform }}" \
+            "${{ matrix.mac_arch }}" \
+            "dist/matlab-openmp/${{ matrix.platform }}/macos-ABI.txt" \
+            true
+          if grep -F "$RUNNER_TOOL_CACHE" "dist/matlab-openmp/${{ matrix.platform }}/macos-ABI.txt"; then
+            echo "macOS OpenMP MEX embeds a runner-specific tool-cache path" >&2
+            exit 1
+          fi
 
   octave:
     name: Octave ${{ matrix.platform }}
