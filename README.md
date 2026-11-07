@@ -6,6 +6,10 @@ The complete `src/` directory is intentionally kept byte-for-byte identical to c
 `e752f56bb6a122b75a0562f4085ab2840d2a6e8d`. Portability and release support live
 outside `src/` so the imported source remains unchanged.
 
+See [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for source-level edge cases
+identified during later review but intentionally not applied to the frozen
+`v0.1.x` source line.
+
 Prebuilt binaries are produced and tested entirely on standard GitHub-hosted Actions runners. MATLAB and Octave artifacts are published separately for Linux, Windows, Intel macOS, and Apple-silicon macOS.
 
 ## Download a release
