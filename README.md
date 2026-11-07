@@ -2,15 +2,14 @@
 
 Cross-platform build and release infrastructure for the FEATool MEX source tree.
 
-The `main` branch and `v0.1.x` release line keep `src/` byte-for-byte identical to
-commit `e752f56bb6a122b75a0562f4085ab2840d2a6e8d`. The `feat/openmp-preview`
-branch intentionally departs from that freeze: it carries the later reviewed source
-corrections so the optional OpenMP code paths can be evaluated without changing the
-published `v0.1.x` baseline.
+The `feat/openmp-preview` branch tracks current `main`, including the reviewed
+source corrections merged after the original import, and adds CI coverage for the
+optional OpenMP code paths. The initial `v0.1.0` source baseline remains available
+at tag `v0.1.0`; later development and release work includes selected corrections.
 
-See [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for source-level edge cases
-identified during later review but intentionally not applied to the frozen
-`v0.1.x` source line.
+See [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for the source-level edge cases
+identified while reviewing the original frozen-source baseline. Some of those
+limitations have since been corrected on `main`.
 
 Prebuilt binaries are produced and tested entirely on standard GitHub-hosted Actions runners. MATLAB and Octave artifacts are published separately for Linux, Windows, Intel macOS, and Apple-silicon macOS.
 
