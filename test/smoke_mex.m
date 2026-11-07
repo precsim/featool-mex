@@ -410,6 +410,85 @@ check_equal(full(U2), eye(3), 1e-12, 'iluk_Cmex_nosymb U');
 check_equal(full(L3), eye(3), 1e-12, 'iluk wrapper L');
 check_equal(full(U3), eye(3), 1e-12, 'iluk wrapper U');
 
+reuse_A1 = sparse([4 1 0; 2 5 1; 0 3 6]);
+reuse_A2 = sparse([5 2 0; 1 6 2; 0 4 7]);
+[reuse_L1, reuse_U1, reuse_levels] = iluk(reuse_A1, 0); %#ok<ASGLU>
+[fresh_L2, fresh_U2] = iluk(reuse_A2, 0);
+[reuse_L2, reuse_U2] = iluk(reuse_A2, [], reuse_levels);
+check_equal(full(reuse_L2), full(fresh_L2), 1e-12, 'iluk reused levels L');
+check_equal(full(reuse_U2), full(fresh_U2), 1e-12, 'iluk reused levels U');
+[direct_reuse_L2, direct_reuse_U2] = iluk_Cmex_nosymb(reuse_A2', reuse_levels);
+check_equal(full(direct_reuse_L2), full(fresh_L2), 1e-12, ...
+    'iluk_Cmex_nosymb reused levels L');
+check_equal(full(direct_reuse_U2), full(fresh_U2), 1e-12, ...
+    'iluk_Cmex_nosymb reused levels U');
+
+logical_A = speye(2) > 0;
+check_throws(@() call_iluk(logical_A, 0), 'double', ...
+    'iluk accepted sparse logical A');
+check_throws(@() call_iluk_cmex(logical_A, 0), 'double', ...
+    'iluk_Cmex accepted sparse logical A');
+check_throws(@() call_iluk_nosymb(logical_A, speye(2)), 'double', ...
+    'iluk_Cmex_nosymb accepted sparse logical A');
+check_throws(@() call_iluk_reuse(speye(3), levels > 0), 'double', ...
+    'iluk accepted sparse logical Lvl');
+check_throws(@() call_iluk_nosymb(speye(3), levels > 0), 'double', ...
+    'iluk_Cmex_nosymb accepted sparse logical Lvl');
+
+check_throws(@() call_iluk(speye(2), Inf), 'finite nonnegative integer', ...
+    'iluk accepted Inf fill level');
+check_throws(@() call_iluk(speye(2), NaN), 'finite nonnegative integer', ...
+    'iluk accepted NaN fill level');
+check_throws(@() call_iluk(speye(2), 2^31 - 1), 'finite nonnegative integer', ...
+    'iluk accepted out-of-range fill level');
+check_throws(@() call_iluk_cmex(speye(2), Inf), 'fits in int', ...
+    'iluk_Cmex accepted Inf fill level');
+check_throws(@() call_iluk_cmex(speye(2), NaN), 'fits in int', ...
+    'iluk_Cmex accepted NaN fill level');
+check_throws(@() call_iluk_cmex(speye(2), 2^31 - 1), 'fits in int', ...
+    'iluk_Cmex accepted out-of-range fill level');
+check_throws(@() call_iluk_cmex(speye(2), 1.5), 'fits in int', ...
+    'iluk_Cmex accepted a noninteger fill level');
+[Lmax, Umax] = iluk(speye(2), 2147483646);
+check_equal(full(Lmax), eye(2), 1e-12, 'iluk maximum fill L');
+check_equal(full(Umax), eye(2), 1e-12, 'iluk maximum fill U');
+[Lint, Uint] = iluk(speye(2), int32(0));
+check_equal(full(Lint), eye(2), 1e-12, 'iluk integer fill L');
+check_equal(full(Uint), eye(2), 1e-12, 'iluk integer fill U');
+[Lsingle, Usingle] = iluk_Cmex(speye(2), single(0));
+check_equal(full(Lsingle), eye(2), 1e-12, 'iluk_Cmex single fill L');
+check_equal(full(Usingle), eye(2), 1e-12, 'iluk_Cmex single fill U');
+
+missing_first_pivot = sparse([0 1; 1 1]);
+missing_second_pivot = sparse(ones(2));
+check_throws(@() call_iluk_cmex(missing_first_pivot, 0), 'zero diagonal', ...
+    'iluk_Cmex accepted a missing first pivot');
+check_throws(@() call_iluk_cmex(missing_second_pivot, 0), 'zero diagonal', ...
+    'iluk_Cmex accepted a missing later pivot');
+check_throws(@() call_iluk_nosymb(missing_second_pivot, sparse(ones(2))), ...
+    'zero diagonal', 'iluk_Cmex_nosymb accepted a missing pivot');
+
+stale_A = speye(3);
+stale_A(1, 2) = 1;
+check_throws(@() call_iluk_reuse(stale_A, levels), 'sparsity pattern of A', ...
+    'iluk accepted an incompatible reused level pattern');
+check_throws(@() call_iluk_nosymb(stale_A', levels), 'sparsity pattern of A', ...
+    'iluk_Cmex_nosymb accepted an incompatible level pattern');
+check_throws(@() call_iluk_reuse(speye(2), sparse(ones(2))), ...
+    'sparsity pattern of A', 'iluk accepted a stale level pattern with removed A entries');
+check_throws(@() call_iluk_nosymb(speye(2), sparse(ones(2))), ...
+    'sparsity pattern of A', ...
+    'iluk_Cmex_nosymb accepted a stale pattern with removed A entries');
+
+check_throws(@() call_iluk_cmex_one_input(speye(2)), 'Two input arguments', ...
+    'iluk_Cmex accepted too few inputs');
+check_throws(@() call_iluk_cmex_one_output(speye(2), 0), ...
+    'between two and three', 'iluk_Cmex accepted too few outputs');
+check_throws(@() call_iluk_nosymb_one_input(speye(2)), 'Two input arguments', ...
+    'iluk_Cmex_nosymb accepted too few inputs');
+check_throws(@() call_iluk_nosymb_one_output(speye(2), speye(2)), ...
+    'Only two outputs', 'iluk_Cmex_nosymb accepted too few outputs');
+
 [rows, cols, coef] = assemble_m(1, 1, 1, 1, 1, 1);
 check_equal(rows, 1, 0, 'assemble_m rows');
 check_equal(cols, 1, 0, 'assemble_m columns');
@@ -527,6 +606,59 @@ if ~caught
     error('SMOKE_MEX:Failure', ...
         'assemble_s accepted 2D input for 3D-only material model %s.', model);
 end
+end
+
+
+function check_throws(func, expected_message, name)
+caught = false;
+try
+    func();
+catch err
+    caught = ~isempty(strfind(err.message, expected_message));
+end
+if ~caught
+    error('SMOKE_MEX:Failure', '%s.', name);
+end
+end
+
+
+function call_iluk(A, lfil)
+[out1, out2] = iluk(A, lfil); %#ok<ASGLU>
+end
+
+
+function call_iluk_reuse(A, levels)
+[out1, out2] = iluk(A, [], levels); %#ok<ASGLU>
+end
+
+
+function call_iluk_cmex(A, lfil)
+[out1, out2] = iluk_Cmex(A, lfil); %#ok<ASGLU>
+end
+
+
+function call_iluk_cmex_one_input(A)
+[out1, out2] = iluk_Cmex(A); %#ok<ASGLU>
+end
+
+
+function call_iluk_cmex_one_output(A, lfil)
+out1 = iluk_Cmex(A, lfil); %#ok<NASGU>
+end
+
+
+function call_iluk_nosymb(A, levels)
+[out1, out2] = iluk_Cmex_nosymb(A, levels); %#ok<ASGLU>
+end
+
+
+function call_iluk_nosymb_one_input(A)
+[out1, out2] = iluk_Cmex_nosymb(A); %#ok<ASGLU>
+end
+
+
+function call_iluk_nosymb_one_output(A, levels)
+out1 = iluk_Cmex_nosymb(A, levels); %#ok<NASGU>
 end
 
 
