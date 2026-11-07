@@ -9,6 +9,7 @@ on:
 
 permissions:
   actions: write
+  checks: read
   contents: read
 
 jobs:
@@ -30,11 +31,37 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
+          current_attempt="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.run_attempt')"
+          current_status="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.status')"
+          current_conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.conclusion')"
+          if [[ "$current_attempt" != "$RUN_ATTEMPT" ||
+                "$current_status" != "completed" ||
+                "$current_conclusion" != "failure" ]]; then
+            echo "retry=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping stale retry event: event attempt=$RUN_ATTEMPT, current attempt=$current_attempt, status=$current_status, conclusion=$current_conclusion"
+            exit 0
+          fi
+
+          jobs_json="$RUNNER_TEMP/consumer-jobs.json"
+          annotations_dir="$RUNNER_TEMP/consumer-annotations"
+          mkdir -p "$annotations_dir"
           gh api \
             "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
-            > "$RUNNER_TEMP/consumer-jobs.json"
+            > "$jobs_json"
+
+          gh api \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion != "success" and .conclusion != "skipped") | .id' |
+          while read -r check_run_id; do
+            [[ -n "$check_run_id" ]] || continue
+            gh api \
+              "/repos/$GITHUB_REPOSITORY/check-runs/$check_run_id/annotations?per_page=100" \
+              > "$annotations_dir/$check_run_id.json"
+          done
+
           python3 ci/classify_consumer_retry.py \
-            "$RUNNER_TEMP/consumer-jobs.json" \
+            "$jobs_json" \
+            --annotations-dir "$annotations_dir" \
             --run-attempt "$RUN_ATTEMPT" \
             --max-attempts 3
 
@@ -43,6 +70,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-        run: >-
-          gh api --method POST
-          "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/rerun-failed-jobs"
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          current_attempt="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.run_attempt')"
+          current_status="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.status')"
+          current_conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.conclusion')"
+          if [[ "$current_attempt" != "$RUN_ATTEMPT" ||
+                "$current_status" != "completed" ||
+                "$current_conclusion" != "failure" ]]; then
+            echo "Skipping stale retry request: event attempt=$RUN_ATTEMPT, current attempt=$current_attempt, status=$current_status, conclusion=$current_conclusion"
+            exit 0
+          fi
+          gh api --method POST \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/rerun-failed-jobs"
