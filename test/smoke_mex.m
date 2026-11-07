@@ -93,6 +93,16 @@ if ~caught
     error('SMOKE_MEX:Failure', 'eindarr accepted complex input.');
 end
 
+caught = false;
+try
+    out = eindarr([1 2 3], complex(1)); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'eindarr accepted complex indices.');
+end
+
 out = earrind([10; 20; 30], 3);
 check_equal(out, 30, 0, 'earrind');
 
@@ -190,6 +200,26 @@ catch
 end
 if ~caught
     error('SMOKE_MEX:Failure', 'earrind accepted complex input.');
+end
+
+caught = false;
+try
+    out = earrind([10; 20; 30], complex(3)); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'earrind accepted complex indices.');
+end
+
+caught = false;
+try
+    out = earrind([1 2; 3 4], [1 2], complex([10 20])); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'earrind accepted complex weights.');
 end
 
 A = sparse([1 3], [1 2], [4 5], 3, 2);
@@ -311,6 +341,35 @@ check_equal(empty_hashes, repmat(empty_hashes(1), 1, 3), 0, ...
 check_equal(empty_member, logical([1 1]), 0, 'fsetop zero-row ismember');
 check_equal(empty_loc, [1 1], 0, 'fsetop zero-row ismember locations');
 
+[empty_intersect, empty_ia, empty_ib] = ...
+    fsetop('intersect', zeros(0, 2), zeros(0, 3));
+check_equal(empty_intersect, zeros(0, 1), 0, 'fsetop zero-row intersect');
+check_equal(empty_ia, 1, 0, 'fsetop zero-row intersect IA');
+check_equal(empty_ib, 1, 0, 'fsetop zero-row intersect IB');
+
+[empty_setdiff, empty_ia] = fsetop('setdiff', zeros(0, 2), zeros(0, 3));
+check_equal(empty_setdiff, zeros(0, 0), 0, 'fsetop zero-row setdiff');
+check_equal(empty_ia, zeros(1, 0), 0, 'fsetop zero-row setdiff IA');
+
+[empty_setxor, empty_ia, empty_ib] = ...
+    fsetop('setxor', zeros(0, 2), zeros(0, 3));
+check_equal(empty_setxor, zeros(0, 0), 0, 'fsetop zero-row setxor');
+check_equal(empty_ia, zeros(1, 0), 0, 'fsetop zero-row setxor IA');
+check_equal(empty_ib, zeros(1, 0), 0, 'fsetop zero-row setxor IB');
+
+[empty_union, empty_ia, empty_ib, empty_ja, empty_jb] = ...
+    fsetop('union', zeros(0, 2), zeros(0, 3));
+check_equal(empty_union, zeros(0, 1), 0, 'fsetop zero-row union');
+check_equal(empty_ia, 1, 0, 'fsetop zero-row union IA');
+check_equal(empty_ib, zeros(1, 0), 0, 'fsetop zero-row union IB');
+check_equal(empty_ja, [1 1], 0, 'fsetop zero-row union JA');
+check_equal(empty_jb, [1 1 1], 0, 'fsetop zero-row union JB');
+
+odd_width = uint8([1 1 4; 2 2 5; 3 3 6]);
+odd_width_unique = fsetop('unique', odd_width);
+check_equal(odd_width_unique, uint8([1 4; 2 5; 3 6]), 0, ...
+    'fsetop odd-byte-width uint8 hashing');
+
 membership = fsetop('ismember', [-0 1], [0 2]);
 check_equal(membership, [1 0], 0, 'fsetop signed zero ismember');
 
@@ -399,6 +458,16 @@ catch
 end
 if ~caught
     error('SMOKE_MEX:Failure', 'spsetd accepted complex sparse input.');
+end
+
+caught = false;
+try
+    S_complex_rows = spsetd(S, complex(1)); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'spsetd accepted complex row indices.');
 end
 
 caught = false;
@@ -602,6 +671,15 @@ check_throws(@() call_assemble_f_no_inputs(), 'First input must be an assembly n
     'assemble_f accepted zero inputs');
 check_throws(@() call_assemble_f_one_output(), 'Exactly 3 output arguments', ...
     'assemble_f accepted too few outputs');
+
+[supg_rows1, supg_cols1, supg_coef1, supg_rrows1, supg_rcoef1] = ... %#ok<ASGLU>
+    assemble_f('SUPG_SemiImplicit', 1, 1, 1, 1, 1, 1, 1, ...
+    1, 1, 1, 1, 1, 10, 0, 1, 0, 1, 0, 1);
+[supg_rows2, supg_cols2, supg_coef2, supg_rrows2, supg_rcoef2] = ... %#ok<ASGLU>
+    assemble_f('SUPG_SemiImplicit', 1, 1, 1, 1, 1, 1, 1, ...
+    1, 1, 1, 1, 1, 10, 0, 2, 0, 1, 0, 1);
+check_equal(supg_coef2(1), 2 * supg_coef1(1), 1e-10, ...
+    'assemble_f SUPG semi-implicit density scaling');
 
 [rows, cols, coef] = assemble_f('convective_Oseen', 1, 1, 1, 1, 1, ...
     1, 1, 1, 1, 1, 1);
