@@ -103,12 +103,15 @@ The `iluk.m` MATLAB/Octave wrapper is included with the binaries. Release bundle
 
 Release binaries are serial builds; OpenMP is disabled for the published baseline.
 
-On `feat/openmp-preview`, CI also builds MATLAB OpenMP variants on Linux and
-Windows. The OpenMP smoke job requests eight threads while limiting the runtime
-team to two (`OMP_NUM_THREADS=8`, `OMP_THREAD_LIMIT=2`) to exercise code that must
-use the actual OpenMP team size rather than assuming the requested size was
-created. These OpenMP builds are experimental CI outputs, not published release
-artifacts.
+On `feat/openmp-preview`, CI also builds MATLAB OpenMP variants on Linux,
+Windows, Intel macOS, and Apple silicon macOS. The OpenMP smoke job requests
+eight threads while limiting the runtime team to two (`OMP_NUM_THREADS=8`,
+`OMP_THREAD_LIMIT=2`) to exercise code that must use the actual OpenMP team size
+rather than assuming the requested size was created. macOS builds use Homebrew's
+OpenMP headers but link against the OpenMP runtime already used by MATLAB
+(`libiomp5` on the tested Intel configuration and `libomp` on Apple silicon) so
+MATLAB does not load two competing OpenMP runtimes. These OpenMP builds are
+experimental CI outputs, not published release artifacts.
 
 ## Tested release configurations
 
