@@ -346,8 +346,6 @@ jobs:
           ./ci/check_windows_binary.ps1
           -Directory "dist/matlab-openmp/${{ matrix.platform }}"
           -ReportFile "dist/matlab-openmp/${{ matrix.platform }}/${{ matrix.audit_file }}"
-          -AllowOpenMP
-          -AllowCompilerRuntime
 
       - name: Inspect OpenMP macOS Mach-O ABI
         if: runner.os == 'macOS'

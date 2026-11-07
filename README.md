@@ -33,6 +33,20 @@ Choose exactly one ZIP for your runtime and platform:
 
 Do not mix MATLAB and Octave bundles. MATLAB uses platform-specific MEX extensions such as `.mexa64`, `.mexw64`, `.mexmaci64`, and `.mexmaca64`; the Octave bundles contain Octave `.mex` binaries.
 
+MATLAB releases also contain optional **experimental OpenMP** bundles. Use one
+of these instead of, not alongside, the corresponding baseline MATLAB bundle:
+
+| Platform | Experimental OpenMP release asset |
+| --- | --- |
+| Linux x86-64 | `matlab-linux-x86_64-openmp.zip` |
+| Windows x86-64 | `matlab-windows-x86_64-openmp.zip` |
+| macOS Intel | `matlab-macos-x86_64-openmp.zip` |
+| macOS Apple silicon | `matlab-macos-arm64-openmp.zip` |
+
+The serial MATLAB bundles remain the default portability-oriented release
+artifacts. OpenMP bundles are built and validated separately and may have a
+narrower runtime/toolchain compatibility range.
+
 ## Installation
 
 1. Download the ZIP that matches your runtime and architecture.
@@ -111,8 +125,9 @@ eight threads while limiting the runtime team to two (`OMP_NUM_THREADS=8`,
 rather than assuming the requested size was created. macOS builds use Homebrew's
 OpenMP headers but link against the OpenMP runtime already used by MATLAB
 (`libiomp5` on the tested Intel configuration and `libomp` on Apple silicon) so
-MATLAB does not load two competing OpenMP runtimes. These OpenMP builds are
-experimental CI outputs, not published release artifacts.
+MATLAB does not load two competing OpenMP runtimes. The release workflow
+publishes these as separate experimental `*-openmp.zip` assets; they do not
+replace the serial MATLAB bundles.
 
 ## Tested release configurations
 
@@ -130,6 +145,20 @@ The table below describes what the release pipeline actually executes. These are
 The MATLAB release build uses the legacy Matrix API compatibility path. On Linux, MATLAB itself runs on the GitHub-hosted Ubuntu runner while every GCC/G++ compile and link command is executed inside the `manylinux2014` container. The Linux ABI audit rejects any MEX binary that imports a `GLIBC_*` symbol newer than `GLIBC_2.17`. This is a manylinux-style ABI target for ordinary `.mexa64` files; the artifacts are not Python wheels and do not carry a formal manylinux tag.
 
 The source intentionally keeps conservative MATLAB syntax, but the published release does **not** claim that MATLAB R2011a was built or tested. R2011a is not provisioned by the GitHub-hosted MATLAB setup used by this repository.
+
+### Experimental MATLAB OpenMP
+
+| Platform | OpenMP build environment | Downloaded-artifact validation environment |
+| --- | --- | --- |
+| Linux x86-64 | MATLAB R2026b on `ubuntu-24.04` | Fresh MATLAB R2026b on `ubuntu-24.04` |
+| Windows x86-64 | MATLAB R2026b with the MinGW support package on `windows-2025` | Fresh MATLAB R2026b with the MinGW support package on `windows-2025` |
+| macOS Intel | MATLAB R2025b on `macos-15-intel`, using Homebrew OpenMP headers and MATLAB `libiomp5` | Fresh MATLAB R2025b on `macos-15-intel`, without rebuilding |
+| macOS Apple silicon | MATLAB R2026b on `macos-15`, using Homebrew OpenMP headers and MATLAB `libomp` | Fresh MATLAB R2026b on `macos-15`, without rebuilding |
+
+The OpenMP validation jobs request eight threads while limiting the runtime
+team to two. Windows release auditing rejects external OpenMP and MinGW runtime
+DLL dependencies. macOS release auditing allows the MATLAB-owned OpenMP runtime
+but rejects runner-specific tool-cache paths in the MEX binaries.
 
 ### GNU Octave
 
