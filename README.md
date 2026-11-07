@@ -106,12 +106,14 @@ The table below describes what the release pipeline actually executes. These are
 
 | Platform | Release build environment | Fresh-runner validation environment |
 | --- | --- | --- |
-| Linux x86-64 | MATLAB R2023a on `ubuntu-22.04` | MATLAB R2026b on `ubuntu-24.04` |
+| Linux x86-64 | MATLAB R2023a on `ubuntu-22.04`, with GCC/G++ executed inside `manylinux2014` (glibc 2.17) | MATLAB R2026b on `ubuntu-24.04` |
 | Windows x86-64 | MATLAB R2023a on `windows-2022`, MinGW 8.1 | MATLAB R2026b on `windows-2025` |
 | macOS Intel | MATLAB R2024b on `macos-15-intel` | MATLAB R2025b on `macos-15-intel` |
 | macOS Apple silicon | MATLAB R2024b on `macos-15` | MATLAB R2026b on `macos-15` |
 
-The MATLAB release build uses the legacy Matrix API compatibility path. The source intentionally keeps conservative MATLAB syntax, but the published release does **not** claim that MATLAB R2011a was built or tested. R2011a is not provisioned by the GitHub-hosted MATLAB setup used by this repository.
+The MATLAB release build uses the legacy Matrix API compatibility path. On Linux, MATLAB itself runs on the GitHub-hosted Ubuntu runner while every GCC/G++ compile and link command is executed inside the `manylinux2014` container. The Linux ABI audit rejects any MEX binary that imports a `GLIBC_*` symbol newer than `GLIBC_2.17`. This is a manylinux-style ABI target for ordinary `.mexa64` files; the artifacts are not Python wheels and do not carry a formal manylinux tag.
+
+The source intentionally keeps conservative MATLAB syntax, but the published release does **not** claim that MATLAB R2011a was built or tested. R2011a is not provisioned by the GitHub-hosted MATLAB setup used by this repository.
 
 ### GNU Octave
 
