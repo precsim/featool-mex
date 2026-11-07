@@ -762,7 +762,7 @@ void AssembleSUPG_SemiImplicit(mxArray* plhs[], const mxArray* prhs[])
             double G_U_hq[dim];
             MatrixVector(dim, dim, G, U_hq[q], G_U_hq);
 
-            tauM[q] = pow( 4*density*density/(dt*dt) + density*ScalarProduct(dim, U_hq[q], G_U_hq) + 30*viscosity*viscosity*traceGtG, -0.5);
+            tauM[q] = pow( 4*density*density/(dt*dt) + density*density*ScalarProduct(dim, U_hq[q], G_U_hq) + 30*viscosity*viscosity*traceGtG, -0.5);
             tauC[q] = 1 / ( tauM[q] * ScalarProduct(dim, g, g) ) ;
         }
 
