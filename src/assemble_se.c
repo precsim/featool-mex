@@ -6,12 +6,10 @@
 #include "mex.h"
 #include <stdio.h>
 #include <math.h>
-#include "blas.h"
 #include <string.h>
+#include "src_dep/mex_size_guard.h"
 #ifdef _OPENMP
 #include <omp.h>
-#else
-#warning "OpenMP not enabled. Compile with mex CSM_assembler_ExtForces.c CFLAGS="\$CFLAGS -fopenmp" LDFLAGS="\$LDFLAGS -fopenmp""
 #endif
 
 
@@ -21,27 +19,28 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     /* Check for proper number of arguments. */
     if(nrhs!=6) {
         mexErrMsgTxt("6 inputs are required.");
-    } else if(nlhs>2) {
-        mexErrMsgTxt("Too many output arguments.");
+    } else if(nlhs!=2) {
+        mexErrMsgTxt("Exactly 2 output arguments are required.");
     }
+    mexRequireIntAddressableInputs(nrhs, prhs);
     
     double* f   = mxGetPr(prhs[0]);
-    int noe     = mxGetN(prhs[1]);
-    int numRowsElements  = mxGetM(prhs[1]);
+    int noe = mexCheckedSizeToInt(mxGetN(prhs[1]), "element count");
+    int numRowsElements = mexCheckedSizeToInt(mxGetM(prhs[1]), "element row count");
     double* elements  = mxGetPr(prhs[1]);
 
-    double* nln_ptr = mxGetPr(prhs[2]);
-    int nln     = (int)(nln_ptr[0]);
+    int nln = mexCheckedPositiveIntScalar(prhs[2], "local node count");
+    int output_size = mexCheckedMulInt(nln, noe, "assembled vector output size");
     
-    plhs[0] = mxCreateDoubleMatrix(nln*noe,1, mxREAL);
-    plhs[1] = mxCreateDoubleMatrix(nln*noe,1, mxREAL);
+    plhs[0] = mxCreateDoubleMatrix(output_size,1, mxREAL);
+    plhs[1] = mxCreateDoubleMatrix(output_size,1, mxREAL);
     
     double* myRrows    = mxGetPr(plhs[0]);
     double* myRcoef    = mxGetPr(plhs[1]);
     
     int k,l;
     int q;
-    int NumQuadPoints     = mxGetN(prhs[3]);
+    int NumQuadPoints = mexCheckedSizeToInt(mxGetN(prhs[3]), "quadrature point count");
     
     double* w   = mxGetPr(prhs[3]);
     double* detjac = mxGetPr(prhs[4]);

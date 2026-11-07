@@ -1,10 +1,12 @@
 # FEATool MEX
 
-Cross-platform build and release infrastructure for the original FEATool MEX source tree.
+Cross-platform build and release infrastructure for the FEATool MEX source tree.
 
-The complete `src/` directory is intentionally kept byte-for-byte identical to commit
-`e752f56bb6a122b75a0562f4085ab2840d2a6e8d`. Portability and release support live
-outside `src/` so the imported source remains unchanged.
+The `main` branch and `v0.1.x` release line keep `src/` byte-for-byte identical to
+commit `e752f56bb6a122b75a0562f4085ab2840d2a6e8d`. The `feat/openmp-preview`
+branch intentionally departs from that freeze: it carries the later reviewed source
+corrections so the optional OpenMP code paths can be evaluated without changing the
+published `v0.1.x` baseline.
 
 Prebuilt binaries are produced and tested entirely on standard GitHub-hosted Actions runners. MATLAB and Octave artifacts are published separately for Linux, Windows, Intel macOS, and Apple-silicon macOS.
 
@@ -97,6 +99,13 @@ The `iluk.m` MATLAB/Octave wrapper is included with the binaries. Release bundle
 - A platform ABI report such as `linux-ABI.json`, `windows-ABI.txt`, or `macos-ABI.txt`.
 
 Release binaries are serial builds; OpenMP is disabled for the published baseline.
+
+On `feat/openmp-preview`, CI also builds MATLAB OpenMP variants on Linux and
+Windows. The OpenMP smoke job requests eight threads while limiting the runtime
+team to two (`OMP_NUM_THREADS=8`, `OMP_THREAD_LIMIT=2`) to exercise code that must
+use the actual OpenMP team size rather than assuming the requested size was
+created. These OpenMP builds are experimental CI outputs, not published release
+artifacts.
 
 ## Tested release configurations
 

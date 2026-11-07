@@ -141,6 +141,47 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  matlab-openmp:
+    name: MATLAB OpenMP ${{ matrix.platform }}
+    needs: manifest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            release: R2026b
+            platform: linux-x86_64
+            compiler: ''
+            products: ''
+          - runner: windows-2025
+            release: R2026b
+            platform: windows-x86_64
+            compiler: mingw
+            products: MATLAB_Support_for_MinGW-w64_C/C++/Fortran_Compiler
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+          products: ${{ matrix.products }}
+
+      - name: Build OpenMP MEX files and run limited-team smoke tests
+        uses: matlab-actions/run-command@v3
+        env:
+          OMP_DYNAMIC: 'FALSE'
+          OMP_NUM_THREADS: '8'
+          OMP_THREAD_LIMIT: '2'
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            outdir=fullfile(pwd,'dist','matlab-openmp','${{ matrix.platform }}');
+            build('outdir',outdir,'openmp',true,'compiler','${{ matrix.compiler }}');
+            smoke_mex(outdir)
+
   octave:
     name: Octave ${{ matrix.platform }}
     needs: manifest
