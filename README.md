@@ -130,6 +130,8 @@ Version tags matching `v*` trigger `.github/workflows/mex-release.yml`. A succes
 
 After publication, `.github/workflows/release-consumer.yml` downloads each published ZIP and the release-level `SHA256SUMS` from the GitHub Release onto fresh GitHub-hosted runners, verifies both the release ZIP and extracted bundle checksums, and runs the smoke tests from the exact source commit recorded in each bundle without rebuilding. Automatic runs also require that recorded source commit to match the release workflow commit. The workflow can be dispatched manually for an existing release tag such as `v0.1.0`.
 
+If GitHub cancels a consumer job before assigning a hosted runner, `.github/workflows/release-consumer-retry.yml` automatically re-runs only the failed jobs, for at most three attempts total. Failures after a runner starts are left unchanged for investigation.
+
 The first hosted release is [`v0.1.0`](https://github.com/precsim/featool-mex/releases/tag/v0.1.0), built from commit `02f0d948e28b6f20f74cabada24f1b82b69a8dc1`.
 
 Normal pull requests use the hosted MEX CI workflow before changes are merged. No self-hosted build machine is required by the active build or release path.
