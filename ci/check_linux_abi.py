@@ -63,7 +63,21 @@ def main() -> int:
     if not binaries:
         raise SystemExit(f"no Linux MEX binaries found in {args.directory}")
 
-    report: dict[str, object] = {"platform": "linux-x86_64", "binaries": {}}
+    ceilings = {
+        "GLIBC": args.max_glibc,
+        "GLIBCXX": args.max_glibcxx,
+        "CXXABI": args.max_cxxabi,
+        "GCC": args.max_gcc,
+    }
+    report: dict[str, object] = {
+        "platform": "linux-x86_64",
+        "configured_ceilings": {
+            namespace: ceiling
+            for namespace, ceiling in ceilings.items()
+            if ceiling is not None
+        },
+        "binaries": {},
+    }
     failures: list[str] = []
 
     for binary in binaries:
@@ -90,12 +104,6 @@ def main() -> int:
             versions[namespace].add(value)
         maxima = {name: highest(values) for name, values in versions.items()}
 
-        ceilings = {
-            "GLIBC": args.max_glibc,
-            "GLIBCXX": args.max_glibcxx,
-            "CXXABI": args.max_cxxabi,
-            "GCC": args.max_gcc,
-        }
         for namespace, ceiling in ceilings.items():
             if ceiling and maxima[namespace]:
                 if version_tuple(maxima[namespace]) <= version_tuple(ceiling):

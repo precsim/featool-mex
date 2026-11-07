@@ -63,7 +63,14 @@ check_equal(out, reshape([40 10 30 20], [2 1 2]), 0, 'eindarr N-D index shape');
 out = eindarr([10 20 30], zeros(1, 0));
 check_equal(out, zeros(1, 0), 0, 'eindarr empty indices');
 
-bad_indices = {0, -1, 1.5, 4, NaN, Inf, int32(-1), uint32(4)};
+out = eindarr([10 20 30], []);
+check_equal(out, zeros(0, 0), 0, 'eindarr canonical empty indices');
+
+check_throws(@() call_eindarr(reshape(1:4, [1 1 4]), 1), ...
+    'two-dimensional array', 'eindarr accepted N-D first input');
+
+bad_indices = {0, -1, 1.5, 4, NaN, Inf, single(0), single(1.5), ...
+    single(4), int32(-1), uint32(4), int64(-1), int64(4), uint64(4)};
 for i = 1:length(bad_indices)
     caught = false;
     try
@@ -86,6 +93,16 @@ if ~caught
     error('SMOKE_MEX:Failure', 'eindarr accepted complex input.');
 end
 
+caught = false;
+try
+    out = eindarr([1 2 3], complex(1)); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'eindarr accepted complex indices.');
+end
+
 out = earrind([10; 20; 30], 3);
 check_equal(out, 30, 0, 'earrind');
 
@@ -104,8 +121,14 @@ check_equal(out, [50; 110], 0, 'earrind weighted row range');
 out = earrind([1 2; 3 4], zeros(1, 0));
 check_equal(out, zeros(0, 2), 0, 'earrind empty indices');
 
+out = earrind([1 2; 3 4], []);
+check_equal(out, zeros(0, 2), 0, 'earrind canonical empty indices');
+
 out = earrind([1 2; 3 4], zeros(1, 0), [10 20]);
 check_equal(out, zeros(0, 1), 0, 'earrind weighted empty indices');
+
+out = earrind([1 2; 3 4], [], [10 20]);
+check_equal(out, zeros(0, 1), 0, 'earrind weighted canonical empty indices');
 
 out = earrind([1 2; 3 4], [1 2], 2);
 check_equal(out, [6; 14], 0, 'earrind scalar weight broadcast');
@@ -177,6 +200,26 @@ catch
 end
 if ~caught
     error('SMOKE_MEX:Failure', 'earrind accepted complex input.');
+end
+
+caught = false;
+try
+    out = earrind([10; 20; 30], complex(3)); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'earrind accepted complex indices.');
+end
+
+caught = false;
+try
+    out = earrind([1 2; 3 4], [1 2], complex([10 20])); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'earrind accepted complex weights.');
 end
 
 A = sparse([1 3], [1 2], [4 5], 3, 2);
@@ -257,6 +300,35 @@ cell_hashes = fsetop('check', empty_cells);
 check_equal(cell_hashes, repmat(cell_hashes(1), 1, 2), 0, ...
     'fsetop unpopulated-cell check');
 
+unpopulated_cell = cell(1, 1);
+explicit_empty_cell = {[]};
+cell_value = fsetop('intersect', unpopulated_cell, explicit_empty_cell);
+if numel(cell_value) ~= 1 || ~isempty(cell_value{1}) || ...
+        ~isa(cell_value{1}, 'double') || ~isequal(size(cell_value{1}), [0 0])
+    error('SMOKE_MEX:Failure', 'fsetop intersect mishandled an unpopulated cell.');
+end
+cell_value = fsetop('intersect', explicit_empty_cell, unpopulated_cell);
+if numel(cell_value) ~= 1 || ~isempty(cell_value{1}) || ...
+        ~isa(cell_value{1}, 'double') || ~isequal(size(cell_value{1}), [0 0])
+    error('SMOKE_MEX:Failure', 'fsetop intersect mishandled an unpopulated cell in operand B.');
+end
+cell_value = fsetop('setdiff', unpopulated_cell, explicit_empty_cell);
+if ~isempty(cell_value)
+    error('SMOKE_MEX:Failure', 'fsetop setdiff mishandled an unpopulated cell.');
+end
+cell_value = fsetop('setxor', unpopulated_cell, explicit_empty_cell);
+if ~isempty(cell_value)
+    error('SMOKE_MEX:Failure', 'fsetop setxor mishandled an unpopulated cell.');
+end
+cell_value = fsetop('union', unpopulated_cell, explicit_empty_cell);
+if numel(cell_value) ~= 1 || ~isempty(cell_value{1}) || ...
+        ~isa(cell_value{1}, 'double')
+    error('SMOKE_MEX:Failure', 'fsetop union mishandled an unpopulated cell.');
+end
+[cell_member, cell_location] = fsetop('ismember', unpopulated_cell, explicit_empty_cell);
+check_equal(cell_member, true, 0, 'fsetop unpopulated-cell ismember');
+check_equal(cell_location, 1, 0, 'fsetop unpopulated-cell ismember location');
+
 [empty_unique, empty_ia, empty_ib] = fsetop('unique', zeros(0, 3));
 check_equal(empty_unique, zeros(0, 1), 0, 'fsetop zero-row unique');
 check_equal(empty_ia, 1, 0, 'fsetop zero-row unique IA');
@@ -268,6 +340,35 @@ check_equal(empty_hashes, repmat(empty_hashes(1), 1, 3), 0, ...
 [empty_member, empty_loc] = fsetop('ismember', zeros(0, 2), zeros(0, 3));
 check_equal(empty_member, logical([1 1]), 0, 'fsetop zero-row ismember');
 check_equal(empty_loc, [1 1], 0, 'fsetop zero-row ismember locations');
+
+[empty_intersect, empty_ia, empty_ib] = ...
+    fsetop('intersect', zeros(0, 2), zeros(0, 3));
+check_equal(empty_intersect, zeros(0, 1), 0, 'fsetop zero-row intersect');
+check_equal(empty_ia, 1, 0, 'fsetop zero-row intersect IA');
+check_equal(empty_ib, 1, 0, 'fsetop zero-row intersect IB');
+
+[empty_setdiff, empty_ia] = fsetop('setdiff', zeros(0, 2), zeros(0, 3));
+check_equal(empty_setdiff, zeros(0, 0), 0, 'fsetop zero-row setdiff');
+check_equal(empty_ia, zeros(1, 0), 0, 'fsetop zero-row setdiff IA');
+
+[empty_setxor, empty_ia, empty_ib] = ...
+    fsetop('setxor', zeros(0, 2), zeros(0, 3));
+check_equal(empty_setxor, zeros(0, 0), 0, 'fsetop zero-row setxor');
+check_equal(empty_ia, zeros(1, 0), 0, 'fsetop zero-row setxor IA');
+check_equal(empty_ib, zeros(1, 0), 0, 'fsetop zero-row setxor IB');
+
+[empty_union, empty_ia, empty_ib, empty_ja, empty_jb] = ...
+    fsetop('union', zeros(0, 2), zeros(0, 3));
+check_equal(empty_union, zeros(0, 1), 0, 'fsetop zero-row union');
+check_equal(empty_ia, 1, 0, 'fsetop zero-row union IA');
+check_equal(empty_ib, zeros(1, 0), 0, 'fsetop zero-row union IB');
+check_equal(empty_ja, [1 1], 0, 'fsetop zero-row union JA');
+check_equal(empty_jb, [1 1 1], 0, 'fsetop zero-row union JB');
+
+odd_width = uint8([1 1 4; 2 2 5; 3 3 6]);
+odd_width_unique = fsetop('unique', odd_width);
+check_equal(odd_width_unique, uint8([1 4; 2 5; 3 6]), 0, ...
+    'fsetop odd-byte-width uint8 hashing');
 
 membership = fsetop('ismember', [-0 1], [0 2]);
 check_equal(membership, [1 0], 0, 'fsetop signed zero ismember');
@@ -357,6 +458,16 @@ catch
 end
 if ~caught
     error('SMOKE_MEX:Failure', 'spsetd accepted complex sparse input.');
+end
+
+caught = false;
+try
+    S_complex_rows = spsetd(S, complex(1)); %#ok<NASGU>
+catch
+    caught = true;
+end
+if ~caught
+    error('SMOKE_MEX:Failure', 'spsetd accepted complex row indices.');
 end
 
 caught = false;
@@ -493,15 +604,23 @@ check_throws(@() call_iluk_nosymb_one_output(speye(2), speye(2)), ...
 check_equal(rows, 1, 0, 'assemble_m rows');
 check_equal(cols, 1, 0, 'assemble_m columns');
 check_equal(coef, 1, 1e-12, 'assemble_m values');
+check_throws(@() call_assemble_m_one_output(), 'Exactly 3 output arguments', ...
+    'assemble_m accepted too few outputs');
 
 [rows, coef] = assemble_se(2, 1, 1, 1, 1, 1);
 check_equal(rows, 1, 0, 'assemble_se rows');
 check_equal(coef, 2, 1e-12, 'assemble_se values');
+check_throws(@() call_assemble_se_one_output(), 'Exactly 2 output arguments', ...
+    'assemble_se accepted too few outputs');
 
 [rows, coef] = assemble_s(2, 'Linear_forces', [1 .25], [0; 0], ...
     1, 1, 1, [1 0 0 1], 1, 1, [0 0]);
 check_equal(rows, [1; 2], 0, 'assemble_s rows');
 check_equal(coef, [0; 0], 1e-12, 'assemble_s values');
+check_throws(@() call_assemble_s_no_inputs(), 'At least two inputs', ...
+    'assemble_s accepted zero inputs');
+check_throws(@() call_assemble_s_one_output(), 'Incorrect number of output arguments', ...
+    'assemble_s accepted too few outputs');
 
 [rows, coef] = assemble_s(2, 'Linear_forces', [1 .25], [0; 0], ...
     [], 1, 1, [1 0 0 1], 1, 1, [0 0]);
@@ -548,6 +667,10 @@ check_assemble_s_2d_rejected('RaghavanVorp_stress', 2);
 check_equal(rows, [1; 1; 2], 0, 'assemble_f rows');
 check_equal(cols, [1; 2; 1], 0, 'assemble_f columns');
 check_equal(coef, [2; -1; 1], 1e-12, 'assemble_f values');
+check_throws(@() call_assemble_f_no_inputs(), 'First input must be an assembly name', ...
+    'assemble_f accepted zero inputs');
+check_throws(@() call_assemble_f_one_output(), 'Exactly 3 output arguments', ...
+    'assemble_f accepted too few outputs');
 
 [supg_rows1, supg_cols1, supg_coef1, supg_rrows1, supg_rcoef1] = ... %#ok<ASGLU>
     assemble_f('SUPG_SemiImplicit', 1, 1, 1, 1, 1, 1, 1, ...
@@ -628,6 +751,43 @@ end
 if ~caught
     error('SMOKE_MEX:Failure', '%s.', name);
 end
+end
+
+
+function call_eindarr(P, C)
+out = eindarr(P, C); %#ok<NASGU>
+end
+
+
+function call_assemble_m_one_output()
+out1 = assemble_m(1, 1, 1, 1, 1, 1); %#ok<NASGU>
+end
+
+
+function call_assemble_se_one_output()
+out1 = assemble_se(2, 1, 1, 1, 1, 1); %#ok<NASGU>
+end
+
+
+function call_assemble_s_no_inputs()
+[out1, out2] = assemble_s(); %#ok<ASGLU>
+end
+
+
+function call_assemble_s_one_output()
+out1 = assemble_s(2, 'Linear_forces', [1 .25], [0; 0], ...
+    1, 1, 1, [1 0 0 1], 1, 1, [0 0]); %#ok<NASGU>
+end
+
+
+function call_assemble_f_no_inputs()
+[out1, out2, out3] = assemble_f(); %#ok<ASGLU>
+end
+
+
+function call_assemble_f_one_output()
+out1 = assemble_f('Stokes', 1, 1, 1, 1, 1, 1, ...
+    1, 1, 1, 1, 1, 1); %#ok<NASGU>
 end
 
 

@@ -98,7 +98,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   const mwSize mc = mxGetM(prhs[1]);
   const mwSize cc = mxGetN(prhs[1]);
   const mwSize nind = mxGetNumberOfElements(prhs[1]);
-  if (!(mc == 1 || cc == 1))
+  if (nind != 0 && !(mc == 1 || cc == 1))
     mexErrMsgTxt("Second argument must be an index vector.");
   mwSize nc = nind;
   mwIndex i1 = 0;

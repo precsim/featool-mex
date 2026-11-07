@@ -115,6 +115,9 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
      !(mxIsDouble(prhs[0]) || mxIsSingle(prhs[0])))
     mexErrMsgTxt("Expecting non-sparse double or single array as first input.");
 
+  if (mxGetNumberOfDimensions(prhs[0]) > 2)
+    mexErrMsgTxt("First input must be a vector or two-dimensional array.");
+
   if(mxIsSparse(prhs[1]) || mxIsComplex(prhs[1]) ||
      !(mxIsDouble(prhs[1]) || mxIsSingle(prhs[1]) || mx_IsInt(prhs[1])))
     mexErrMsgTxt("Expecting non-sparse double, single, or integer array as second input.");
