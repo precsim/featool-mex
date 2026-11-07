@@ -77,6 +77,7 @@ jobs:
           set -euo pipefail
           matlab_bin="$(readlink -f "$(command -v matlab)")"
           matlab_root="$(dirname "$(dirname "$matlab_bin")")"
+          export MEX_MANYLINUX_MATLAB_ROOT="$matlab_root"
           docker pull "$MEX_MANYLINUX_IMAGE"
           chmod +x ci/run_manylinux_compiler.sh ci/manylinux-toolchain/*
           {
