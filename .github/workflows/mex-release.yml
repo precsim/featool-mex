@@ -159,7 +159,7 @@ jobs:
           name: matlab-${{ matrix.platform }}-hosted-release
           path: dist/matlab/${{ matrix.platform }}/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
 
   matlab-artifact-validation:
     name: MATLAB downloaded-artifact validation ${{ matrix.platform }}
@@ -331,7 +331,7 @@ jobs:
           name: octave-${{ matrix.platform }}-hosted-release
           path: dist/octave/${{ matrix.platform }}/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
 
   octave-artifact-validation:
     name: Octave downloaded-artifact validation ${{ matrix.platform }}
@@ -506,7 +506,7 @@ jobs:
             bundles/*.zip
             bundles/SHA256SUMS
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 1
 
   publish:
     name: Publish GitHub Release
@@ -514,6 +514,7 @@ jobs:
     needs: release-bundle
     runs-on: ubuntu-24.04
     permissions:
+      actions: write
       contents: write
     steps:
       - name: Download validated bundles
@@ -558,3 +559,18 @@ jobs:
               --verify-tag \
               --generate-notes
           fi
+
+      - name: Delete published Actions artifacts
+        continue-on-error: true
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[].id' |
+          while read -r artifact_id; do
+            [[ -n "$artifact_id" ]] || continue
+            gh api --method DELETE \
+              "/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+          done
