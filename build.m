@@ -23,6 +23,11 @@ function info = build(varargin)
 %   used by hosted Windows CI to select the MinGW support package because
 %   the sources require C99 variable-length arrays.
 %
+%   BUILD(..., 'compilercommand', COMMAND) overrides the compiler executable
+%   passed to MEX on Linux. A struct with fields c and cpp may be supplied.
+%   This is used by compatibility CI to route GCC/G++ through a controlled
+%   old-glibc build environment without moving the MATLAB process itself.
+%
 % Keep this file compatible with MATLAB R2011a.
 
 % Copyright 2013-2026 Precise Simulation, Ltd.
@@ -41,6 +46,7 @@ optdef.ver      = version();
 optdef.mx       = mexext();
 optdef.mexopts  = '';
 optdef.compiler = '';
+optdef.compilercommand = '';
 optdef.metadata = true;
 
 if mod(length(varargin), 2) ~= 0
@@ -120,6 +126,14 @@ for i = 1:length(targets)
     end
     args = [args c_standard_args(target.language, opt.mx, ...
         mexopts_file, opt.compiler)]; %#ok<AGROW>
+    compiler_command = target_compiler_command(opt.compilercommand, target.language);
+    if ~isempty(compiler_command)
+        if ~strncmpi(opt.mx, 'mexa', 4)
+            error('BUILD:CompilerCommand', ...
+                'compilercommand is currently supported only for Linux MEX builds.');
+        end
+        args{end + 1} = ['GCC=' compiler_command];
+    end
     if opt.openmp && target.openmp
         args = [args openmp_args(target.language, opt.mx, mexopts_file, ...
             opt.compiler, ~isempty(explicit_mexopts_file))]; %#ok<AGROW>
@@ -224,6 +238,24 @@ elseif isstruct(config) && isfield(config, language)
 else
     error('BUILD:MexOptions', ...
         'mexopts must be a file path or a struct with c/cpp fields.');
+end
+end
+
+
+function value = target_compiler_command(config, language)
+if isempty(config)
+    value = '';
+elseif ischar(config)
+    value = config;
+elseif isstruct(config) && isfield(config, language)
+    value = getfield(config, language); %#ok<GFLD>
+    if ~ischar(value)
+        error('BUILD:CompilerCommand', ...
+            'compilercommand.%s must be a character array.', language);
+    end
+else
+    error('BUILD:CompilerCommand', ...
+        'compilercommand must be a command path or a struct with c/cpp fields.');
 end
 end
 

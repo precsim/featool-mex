@@ -39,8 +39,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
-            release: R2026b
+          - runner: ubuntu-22.04
+            release: R2023a
             platform: linux-x86_64
             extension: mexa64
             audit: linux
@@ -81,13 +81,36 @@ jobs:
           release: ${{ matrix.release }}
           products: ${{ matrix.products }}
 
+      - name: Configure manylinux2014 compiler toolchain
+        if: matrix.audit == 'linux'
+        env:
+          MEX_MANYLINUX_IMAGE: quay.io/pypa/manylinux2014_x86_64
+        run: |
+          set -euo pipefail
+          matlab_bin="$(readlink -f "$(command -v matlab)")"
+          matlab_root="$(dirname "$(dirname "$matlab_bin")")"
+          docker pull "$MEX_MANYLINUX_IMAGE"
+          chmod +x ci/run_manylinux_compiler.sh ci/manylinux-toolchain/*
+          {
+            echo "MEX_MANYLINUX_IMAGE=$MEX_MANYLINUX_IMAGE"
+            echo "MEX_MANYLINUX_MATLAB_ROOT=$matlab_root"
+            echo "MEX_COMPILER_DESCRIPTION=manylinux2014 GCC 10 (glibc 2.17)"
+            echo "MEX_LINKER_DESCRIPTION=manylinux2014 GCC 10 (glibc 2.17)"
+          } >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/ci/manylinux-toolchain" >> "$GITHUB_PATH"
+          "$GITHUB_WORKSPACE/ci/manylinux-toolchain/gcc" --version
+
       - name: Build serial MEX files and run smoke tests
         uses: matlab-actions/run-command@v3
         with:
           command: >-
             addpath(fullfile(pwd,'test'));
             outdir=fullfile(pwd,'dist','matlab','${{ matrix.platform }}');
-            build('outdir',outdir,'openmp',false,'compiler','${{ matrix.compiler }}');
+            compilercommand='';
+            if isunix && ~ismac,
+              compilercommand=struct('c',fullfile(pwd,'ci','manylinux-toolchain','gcc'),'cpp',fullfile(pwd,'ci','manylinux-toolchain','g++'));
+            end;
+            build('outdir',outdir,'openmp',false,'compiler','${{ matrix.compiler }}','compilercommand',compilercommand);
             smoke_mex(outdir)
 
       - name: Inspect Linux ELF ABI
@@ -96,6 +119,7 @@ jobs:
           python3 ci/check_linux_abi.py
           "dist/matlab/${{ matrix.platform }}"
           --extensions "${{ matrix.extension }}"
+          --max-glibc 2.17
           --output "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
       - name: Inspect Windows PE ABI
