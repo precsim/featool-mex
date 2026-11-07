@@ -2,13 +2,15 @@
 
 Cross-platform build and release infrastructure for the original FEATool MEX source tree.
 
-The complete `src/` directory is intentionally kept byte-for-byte identical to commit
-`e752f56bb6a122b75a0562f4085ab2840d2a6e8d`. Portability and release support live
-outside `src/` so the imported source remains unchanged.
+The source import at commit `e752f56bb6a122b75a0562f4085ab2840d2a6e8d` is the
+project baseline. Release `v0.1.0` preserved that `src/` tree byte-for-byte.
+Starting with `v0.1.1`, releases include reviewed source-level correctness,
+validation, and portability fixes, so later `src/` trees intentionally differ
+from the original import.
 
-See [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for source-level edge cases
-identified during later review but intentionally not applied to the frozen
-`v0.1.x` source line.
+See [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) for release-specific behavior,
+historical limitations of the original source, and the releases that addressed
+them.
 
 Prebuilt binaries are produced and tested entirely on standard GitHub-hosted Actions runners. MATLAB and Octave artifacts are published separately for Linux, Windows, Intel macOS, and Apple-silicon macOS.
 
