@@ -35,6 +35,7 @@ jobs:
             audit: linux
             audit_file: linux-ABI.json
             compiler: ''
+            compatibility: GitHub-hosted R2023a build with manylinux2014 GCC/G++, same-runtime smoke test, and GLIBC <= 2.17 audit passed
           - runner: windows-2022
             release: R2023a
             platform: windows-x86_64
@@ -42,6 +43,7 @@ jobs:
             audit: windows
             audit_file: windows-ABI.txt
             compiler: mingw
+            compatibility: GitHub-hosted R2023a build, same-runtime smoke test, and binary audit passed
           - runner: macos-15-intel
             release: R2024b
             platform: macos-x86_64
@@ -49,6 +51,7 @@ jobs:
             audit: macos-x86_64
             audit_file: macos-ABI.txt
             compiler: ''
+            compatibility: GitHub-hosted R2024b build, same-runtime smoke test, and binary audit passed
           - runner: macos-15
             release: R2024b
             platform: macos-arm64
@@ -56,6 +59,7 @@ jobs:
             audit: macos-arm64
             audit_file: macos-ABI.txt
             compiler: ''
+            compatibility: GitHub-hosted R2024b build, same-runtime smoke test, and binary audit passed
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -64,6 +68,26 @@ jobs:
         uses: matlab-actions/setup-matlab@v3
         with:
           release: ${{ matrix.release }}
+
+      - name: Configure manylinux2014 compiler toolchain
+        if: matrix.audit == 'linux'
+        env:
+          MEX_MANYLINUX_IMAGE: quay.io/pypa/manylinux2014_x86_64
+        run: |
+          set -euo pipefail
+          matlab_bin="$(readlink -f "$(command -v matlab)")"
+          matlab_root="$(dirname "$(dirname "$matlab_bin")")"
+          export MEX_MANYLINUX_MATLAB_ROOT="$matlab_root"
+          docker pull "$MEX_MANYLINUX_IMAGE"
+          chmod +x ci/run_manylinux_compiler.sh ci/manylinux-toolchain/*
+          {
+            echo "MEX_MANYLINUX_IMAGE=$MEX_MANYLINUX_IMAGE"
+            echo "MEX_MANYLINUX_MATLAB_ROOT=$matlab_root"
+            echo "MEX_COMPILER_DESCRIPTION=manylinux2014 GCC 10 (glibc 2.17)"
+            echo "MEX_LINKER_DESCRIPTION=manylinux2014 GCC 10 (glibc 2.17)"
+          } >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/ci/manylinux-toolchain" >> "$GITHUB_PATH"
+          "$GITHUB_WORKSPACE/ci/manylinux-toolchain/gcc" --version
 
       - name: Install supported MinGW 8.1 on Windows
         if: matrix.audit == 'windows'
@@ -106,7 +130,11 @@ jobs:
           command: >-
             addpath(fullfile(pwd,'test'));
             outdir=fullfile(pwd,'dist','matlab','${{ matrix.platform }}');
-            build('outdir',outdir,'openmp',false,'compiler','${{ matrix.compiler }}');
+            compilercommand='';
+            if isunix && ~ismac,
+              compilercommand=struct('c',fullfile(pwd,'ci','manylinux-toolchain','gcc'),'cpp',fullfile(pwd,'ci','manylinux-toolchain','g++'));
+            end;
+            build('outdir',outdir,'openmp',false,'compiler','${{ matrix.compiler }}','compilercommand',compilercommand);
             smoke_mex(outdir)
 
       - name: Inspect Linux ELF ABI
@@ -115,6 +143,7 @@ jobs:
           python3 ci/check_linux_abi.py
           "dist/matlab/${{ matrix.platform }}"
           --extensions "${{ matrix.extension }}"
+          --max-glibc 2.17
           --output "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
 
       - name: Inspect Windows PE ABI
@@ -151,7 +180,7 @@ jobs:
           --built-with "${{ matrix.release }}"
           --audit-file "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
           --source-sha "${{ github.sha }}"
-          --compatibility "GitHub-hosted ${{ matrix.release }} build, same-runtime smoke test, and binary audit passed"
+          --compatibility "${{ matrix.compatibility }}"
 
       - name: Upload MATLAB release artifact
         uses: actions/upload-artifact@v7

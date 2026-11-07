@@ -7,6 +7,7 @@
 /* S. Engblom 2004-10-29 */
 
 #include <math.h>
+#include <limits.h>
 #include <string.h>
 // temporary fix for CC under Solaris:
 #ifndef NO_STDINT
@@ -14,7 +15,6 @@
 #endif
 
 #include "mex.h"
-#include "matrix.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -89,14 +89,19 @@ mxArray *gsparse_nosort(const int *ii,int imod,
 void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
 {
 #ifdef FSPARSE_TIME
-  // output time vector allocated here already
-  plhs[1] = mxCreateDoubleMatrix(1,6,mxREAL);
-  time_vec = mxGetPr(plhs[1]);
-
   // check of syntax
   if (nrhs < 1 || nrhs == 2 || 6 < nrhs  || nlhs > 2)
     mexErrMsgIdAndTxt("fsparse:e1",
 		      "Expecting 1, 3..6 inputs and one or two outputs.");
+
+  // timing remains available even when the caller does not request it
+  double time_dummy[6];
+  if (nlhs > 1) {
+    plhs[1] = mxCreateDoubleMatrix(1,6,mxREAL);
+    time_vec = mxGetPr(plhs[1]);
+  }
+  else
+    time_vec = time_dummy;
 #else
   if (nrhs < 1 || nrhs == 2 || 6 < nrhs  || nlhs > 1)
     mexErrMsgIdAndTxt("fsparse:e1",
@@ -149,13 +154,16 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
 			  "character array.");
       if (nrhs > 5) {
 	// must determine the number of threads here (before any parallel region)
-	if (!mxIsDouble(prhs[5]) || 
+		if (!mxIsDouble(prhs[5]) || mxIsComplex(prhs[5]) ||
 	    mxGetNumberOfElements(prhs[5]) != 1)
 	  mexErrMsgIdAndTxt("fsparse:e17","Number of threads must be a "
 			    "real scalar.");
-	const int nthreads = (int)mxGetScalar(prhs[5]);
-	if (nthreads < 1)
-	  mexErrMsgIdAndTxt("fsparse:e18","Number of threads must be >= 1.");
+		const double nthreads_value = mxGetScalar(prhs[5]);
+		if (!isfinite(nthreads_value) || nthreads_value < 1.0 ||
+			    nthreads_value >= INT_MAX || nthreads_value != floor(nthreads_value))
+		  mexErrMsgIdAndTxt("fsparse:e18","Number of threads must be a positive "
+				    "integer in the supported 32-bit range.");
+		const int nthreads = (int)nthreads_value;
 #ifdef _OPENMP
 	omp_set_num_threads(nthreads);
 #endif // ignored otherwise
@@ -164,14 +172,27 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
   }
 
   // input
-  const int Mii = mxGetM(prhs[0]),Nii = mxGetN(prhs[0]);
-  const int Mjj = mxGetM(prhs[1]),Njj = mxGetN(prhs[1]);
+  const mwSize Mii_size = mxGetM(prhs[0]),Nii_size = mxGetN(prhs[0]);
+  const mwSize Mjj_size = mxGetM(prhs[1]),Njj_size = mxGetN(prhs[1]);
+  const mwSize Mss_size = mxGetM(prhs[2]),Nss_size = mxGetN(prhs[2]);
+  if (Mii_size >= INT_MAX || Nii_size >= INT_MAX ||
+      Mjj_size >= INT_MAX || Njj_size >= INT_MAX ||
+      Mss_size >= INT_MAX || Nss_size >= INT_MAX ||
+      mxGetNumberOfElements(prhs[0]) >= INT_MAX ||
+      mxGetNumberOfElements(prhs[1]) >= INT_MAX ||
+      mxGetNumberOfElements(prhs[2]) >= INT_MAX ||
+      (Njj_size != 0 && Mii_size > (mwSize)INT_MAX/Njj_size))
+    mexErrMsgIdAndTxt("fsparse:e19",
+                      "Input dimensions exceed the supported 32-bit index range.");
+
+  const int Mii = (int)Mii_size,Nii = (int)Nii_size;
+  const int Mjj = (int)Mjj_size,Njj = (int)Njj_size;
   const bool nocopyii = mx_IsInt(prhs[0]),nocopyjj = mx_IsInt(prhs[1]);  
   int *ii,*jj;
-  const int Mss = mxGetM(prhs[2]),Nss = mxGetN(prhs[2]);
+  const int Mss = (int)Mss_size,Nss = (int)Nss_size;
   const double *sr = mxGetPr(prhs[2]);
   const double *si = mxGetPi(prhs[2]);
-  const int len = Mii*Njj;
+  const int len = (int)(Mii_size*Njj_size);
   int M = 0,N = 0,Nzmax = -1,sort = 1;
 
   // check of 'assembly' syntax
@@ -203,29 +224,32 @@ void mexFunction(int nlhs,mxArray *plhs[],int nrhs,const mxArray *prhs[])
 
   // determine the input dimensions [M N Nzmax] of the output
   if (nrhs > 3) {
-    const int szlen = mxGetNumberOfElements(prhs[3]);
+    const mwSize szlen = mxGetNumberOfElements(prhs[3]);
     const double *szval = mxGetPr(prhs[3]);
 
     if (szlen > 0) {
-      if (szval[0] < 0.0 || szval[0] != ceil(szval[0]))
+      if (szval[0] < 0.0 || szval[0] >= INT_MAX ||
+          szval[0] != ceil(szval[0]))
 	mexErrMsgIdAndTxt("fsparse:e11","Size argument must be "
 			  "nonnegative integer.");
       if (M > szval[0])
 	mexErrMsgIdAndTxt("fsparse:e12","Index exceeds matrix dimensions.");
-      M = szval[0];
+      M = (int)szval[0];
       if (szlen > 1) {
-	if (szval[1] < 0.0 || szval[1] != ceil(szval[1]))
+	if (szval[1] < 0.0 || szval[1] >= INT_MAX ||
+            szval[1] != ceil(szval[1]))
 	  mexErrMsgIdAndTxt("fsparse:e11","Size argument must be "
 			    "nonnegative integer.");
 	if (N > szval[1])
 	  mexErrMsgIdAndTxt("fsparse:e12","Index exceeds "
 			    "matrix dimensions.");
-	N = szval[1];
+	N = (int)szval[1];
 	if (szlen > 2) {
-	  if (szval[2] < 0.0 || szval[2] != ceil(szval[2]))
+	  if (szval[2] < 0.0 || szval[2] >= INT_MAX ||
+              szval[2] != ceil(szval[2]))
 	    mexErrMsgIdAndTxt("fsparse:e13","Nzmax argument must be "
 			      "nonnegative integer.");
-	  Nzmax = szval[2];
+	  Nzmax = (int)szval[2];
 	  if (szlen > 3)
 	    mexErrMsgIdAndTxt("fsparse:e14","Size argument must "
 			      "contain 3 elements or less.");
@@ -321,7 +345,7 @@ bool getix(int **ix,int M,int N,int *max,bool nocopy,const mxArray *IX)
     // no copy
     const int *iix = (*ix = (int *)mxGetData(IX));
     for (int i = 0; i < M*N; i++) {
-      if (iix[i] < 1)
+      if (iix[i] < 1 || iix[i] >= INT_MAX)
 	return false;
       if (iix[i] > mx) mx = iix[i];
     }
@@ -331,7 +355,8 @@ bool getix(int **ix,int M,int N,int *max,bool nocopy,const mxArray *IX)
     const double *ival = mxGetPr(IX);
     int *iix = (*ix = mxMalloc(M*N*sizeof(int)));
     for (int i = 0; i < M*N; i++) {
-      if (ival[i] < 1.0 || ival[i] != ceil(ival[i]))
+      if (ival[i] < 1.0 || ival[i] >= INT_MAX ||
+          ival[i] != ceil(ival[i]))
 	return false;
       if ((iix[i] = ival[i]) > mx) mx = ival[i];
     }
@@ -340,45 +365,51 @@ bool getix(int **ix,int M,int N,int *max,bool nocopy,const mxArray *IX)
   if (nocopy) {
     // no copy
     const int *iix = (*ix = (int *)mxGetData(IX));
-#pragma omp parallel shared (mx)
+    const int initial_max = mx;
+#pragma omp parallel
 {
-    int mymx = mx; // local version of mx
+    int mymx = initial_max; // local version of mx
+    bool myok = true;
+    int i;
 #pragma omp for
-    for (int i = 0; i < M*N; i++) {
-      if (iix[i] > mymx)
+    for (i = 0; i < M*N; i++) {
+      if (iix[i] < 1 || iix[i] >= INT_MAX)
+		myok = false; // no harm in continuing
+      else if (iix[i] > mymx)
 	mymx = iix[i];
-      else if (iix[i] < 1)
-	ok = false; // no harm in continuing
     }
 
-    if (mx < mymx)
 #pragma omp critical
-      // ensure nothing changed, then make the swap:
+    {
+      if (!myok) ok = false;
       if (mx < mymx) mx = mymx;
+    }
 } // end omp parallel
   }
   else {
     // typecast copy
     const double *ival = mxGetPr(IX);
-    int *iix;
-#pragma omp critical
-     // not thread-safe:
-    iix = (*ix = mxMalloc(M*N*sizeof(int)));
-#pragma omp parallel shared (mx)
+    int *iix = (*ix = mxMalloc(M*N*sizeof(int)));
+    const int initial_max = mx;
+#pragma omp parallel
 {
-    int mymx = mx; // local version of mx
+    int mymx = initial_max; // local version of mx
+    bool myok = true;
+    int i;
 #pragma omp for
-    for (int i = 0; i < M*N; i++) {
-      if (ival[i] < 1.0 || ival[i] != ceil(ival[i]))
-	ok = false; // no harm in continuing
+    for (i = 0; i < M*N; i++) {
+      if (ival[i] < 1.0 || ival[i] >= INT_MAX ||
+          ival[i] != ceil(ival[i]))
+	myok = false; // no harm in continuing
       else if ((iix[i] = ival[i]) > mymx)
 	mymx = ival[i];
     }
 
-    if (mx < mymx)
 #pragma omp critical
-      // ensure nothing changed, then make the swap:
+    {
+      if (!myok) ok = false;
       if (mx < mymx) mx = mymx;
+    }
 } // end omp parallel
   }
 #endif // _OPENMP
@@ -393,7 +424,8 @@ mxArray *sparse2sparse(const mxArray *S)
   const mwSize *jcS = mxGetJc(S);
   const mwIndex *irS = mxGetIr(S);
   const double *prS = mxGetPr(S),*piS = mxGetPi(S);
-  const int N = mxGetN(S),M = mxGetM(S),Nnz = jcS[N];
+  const mwSize N = mxGetN(S),M = mxGetM(S);
+  const mwIndex Nnz = jcS[N];
   const bool real = piS == NULL;
   mxArray *T;
 
@@ -411,7 +443,7 @@ mxArray *full2sparse(const mxArray *A)
 /* Constructs a sparse matrix S from a full matrix A. */
 {
   const double *prA = mxGetPr(A),*piA = mxGetPi(A);
-  const int N = mxGetN(A),M = mxGetM(A);
+  const mwSize N = mxGetN(A),M = mxGetM(A);
   const bool real = piA == NULL;
   mxArray *S;
 
@@ -421,10 +453,10 @@ mxArray *full2sparse(const mxArray *A)
     double *prS;
 
     /* determine the column pointer */
-    for (int c = 1,k = 0; c <= N; c++,k += M)
-      for (int i = 0; i < M; i++)
+    for (mwSize c = 1,k = 0; c <= N; c++,k += M)
+      for (mwSize i = 0; i < M; i++)
 	if (prA[k+i] != 0.0) jcS[c]++;
-    for (int c = 2; c <= N; c++) jcS[c] += jcS[c-1];
+    for (mwSize c = 2; c <= N; c++) jcS[c] += jcS[c-1];
 
     /* allocate */
     S = mxCreateSparse(0,0,jcS[N],mxREAL);
@@ -438,8 +470,8 @@ mxArray *full2sparse(const mxArray *A)
     mxSetJc(S,jcS);
 
     /* copy data */
-    for (int c = 1,k = 0,dest = 0; c <= N; c++,k += M)
-      for (int i = 0; i < M; i++)
+    for (mwSize c = 1,k = 0,dest = 0; c <= N; c++,k += M)
+      for (mwSize i = 0; i < M; i++)
 	if (prA[k+i] != 0.0) {
 	  irS[dest] = i;
 	  prS[dest++] = prA[k+i];
@@ -450,10 +482,10 @@ mxArray *full2sparse(const mxArray *A)
     mwIndex *irS;
     double *prS,*piS;
 
-    for (int c = 1,k = 0; c <= N; c++,k += M)
-      for (int i = 0; i < M; i++)
-	if (prA[k+i] != 0.0 && piA[k+i] != 0.0) jcS[c]++;
-    for (int c = 2; c <= N; c++) jcS[c] += jcS[c-1];
+    for (mwSize c = 1,k = 0; c <= N; c++,k += M)
+      for (mwSize i = 0; i < M; i++)
+	if (prA[k+i] != 0.0 || piA[k+i] != 0.0) jcS[c]++;
+    for (mwSize c = 2; c <= N; c++) jcS[c] += jcS[c-1];
 
     S = mxCreateSparse(0,0,jcS[N],mxCOMPLEX);
     mxSetM(S,M);
@@ -465,9 +497,9 @@ mxArray *full2sparse(const mxArray *A)
     mxFree(mxGetJc(S));
     mxSetJc(S,jcS);
 
-    for (int c = 1,k = 0,dest = 0; c <= N; c++,k += M)
-      for (int i = 0; i < M; i++)
-	if (prA[k+i] != 0.0 && piA[k+i] != 0.0) {
+    for (mwSize c = 1,k = 0,dest = 0; c <= N; c++,k += M)
+      for (mwSize i = 0; i < M; i++)
+	if (prA[k+i] != 0.0 || piA[k+i] != 0.0) {
 	  irS[dest] = i;
 	  prS[dest] = prA[k+i];
 	  piS[dest++] = piA[k+i];
@@ -485,13 +517,14 @@ void squeeze(mxArray *S)
    on memmove() that performs the same operation. However, benchmark
    tests indicate that the following simple code optimizes better. */
 {
-  const int N = mxGetN(S);
+  const mwSize N = mxGetN(S);
   mwSize *jcS = mxGetJc(S);
   mwIndex *irS = mxGetIr(S);
   double *prS = mxGetPr(S),*piS = mxGetPi(S);
 
   if (piS == NULL) {
-    int c,i;
+    mwSize c;
+    mwIndex i;
 
     /* find the first zero, if any */
     for (i = c = 0; c < N; c++)
@@ -502,7 +535,7 @@ void squeeze(mxArray *S)
 
   rfound0:
     /* copy in a conservative fashion */
-    for (int dest = i++; c < N; c++) {
+    for (mwIndex dest = i++; c < N; c++) {
       for ( ; i < jcS[c+1]; i++)
 	if (prS[i] != 0.0) {
 	  irS[dest] = irS[i];
@@ -512,7 +545,8 @@ void squeeze(mxArray *S)
     }
   }
   else {
-    int c,i;
+    mwSize c;
+    mwIndex i;
     for (i = c = 0; c < N; c++)
       for ( ; i < jcS[c+1]; i++)
 	if (prS[i] == 0.0 && piS[i] == 0.0)
@@ -520,7 +554,7 @@ void squeeze(mxArray *S)
     return;
 
   zfound0:
-    for (int dest = i++; c < N; c++) {
+    for (mwIndex dest = i++; c < N; c++) {
       for ( ; i < jcS[c+1]; i++)
 	if (prS[i] != 0.0 || piS[i] != 0.0) {
 	  irS[dest] = irS[i];
@@ -570,8 +604,10 @@ void sparse_insert(mwIndex *irS,double *prS,double *piS,
 {
       const int nThreads = omp_get_num_threads();
       const int myId = omp_get_thread_num();
-      const int rstart = 1+M*myId/nThreads;
-      const int rend = M*(myId+1)/nThreads;
+      const int rbase = M/nThreads,rrem = M%nThreads;
+      const int rbegin = rbase*myId+(myId < rrem ? myId : rrem);
+      const int rstart = rbegin+1;
+      const int rend = rbegin+rbase+(myId < rrem);
       int istart;
       if (rstart == 1)
 	istart = 0;
@@ -597,8 +633,10 @@ void sparse_insert(mwIndex *irS,double *prS,double *piS,
   if (rank != NULL) {
     const int nThreads = omp_get_num_threads();
     const int myId = omp_get_thread_num();
-    const int rstart = 1+M*myId/nThreads;
-    const int rend = M*(myId+1)/nThreads;
+    const int rbase = M/nThreads,rrem = M%nThreads;
+    const int rbegin = rbase*myId+(myId < rrem ? myId : rrem);
+    const int rstart = rbegin+1;
+    const int rend = rbegin+rbase+(myId < rrem);
     int istart;
     if (rstart == 1)
       istart = 0;
@@ -826,7 +864,7 @@ mxArray *sparse(const int *ii,const int *jj,
 
   // Part 1: count and accumulate indices to rows
   StartTime;
-  jrS = mxCalloc(M+1,sizeof(jrS[0]));
+  jrS = mxCalloc((mwSize)M+1,sizeof(jrS[0]));
   for (int i = 0; i < len; i++) jrS[ii[i]]++;
   for (int r = 2; r <= M; r++) jrS[r] += jrS[r-1];
   StopTime;
@@ -840,8 +878,7 @@ mxArray *sparse(const int *ii,const int *jj,
   // Part 2: build rank with the active use of jrS
   StartTime;
   rank = mxMalloc(len*sizeof(rank[0]));
-  jrS--; /* (unit-offset in ii) */
-  for (int i = 0; i < len; i++) rank[jrS[ii[i]]++] = i;
+  for (int i = 0; i < len; i++) rank[jrS[ii[i]-1]++] = i;
   // rank now allows for row-wise traversal
   StopTime;
   GetTime(time_vec[2]);
@@ -849,8 +886,8 @@ mxArray *sparse(const int *ii,const int *jj,
   mexPrintf("rank = [");
   for (int i = 0; i < len; i++) mexPrintf("%d,",rank[i]);
   mexPrintf("]\n");
-  mexPrintf("jrS = [*,");
-  for (int r = 1; r <= M+1; r++) mexPrintf("%d,",jrS[r]);
+  mexPrintf("jrS = [");
+  for (int r = 0; r <= M; r++) mexPrintf("%d,",jrS[r]);
   mexPrintf("]\n\n");
 #endif
 
@@ -858,27 +895,26 @@ mxArray *sparse(const int *ii,const int *jj,
      to rowindices, building both an index vector irank and the final
      column pointer at the same time */
   StartTime;
-  jcS = mxCalloc(N+1,sizeof(jcS[0]));
+  jcS = mxCalloc((mwSize)N+1,sizeof(jcS[0]));
   hcol = mxCalloc(N,sizeof(hcol[0]));
-  hcol--; /* (unit-offset in jj) */
   irank = mxMalloc(len*sizeof(irank[0]));
   for (int row = 1,i = 0; row <= M; row++)
-    for ( ; i < jrS[row]; i++) {
+    for ( ; i < jrS[row-1]; i++) {
       const int ixijs = rank[i]; // index into input data triplet (ii,jj,sr)
       const int col = jj[ixijs]; // column index
 
       // new element?
-      if (hcol[col] < row) {
-	hcol[col] = row; // remembered by the row index
+      if (hcol[col-1] < row) {
+	hcol[col-1] = row; // remembered by the row index
 	jcS[col]++;      // count it
       }
 
       // irank keeps track of where it should go
       irank[ixijs] = jcS[col]-1;
     }
-  mxFree(++hcol);
+  mxFree(hcol);
   mxFree(rank);
-  mxFree(++jrS);
+  mxFree(jrS);
   StopTime;
   GetTime(time_vec[3]);
 #ifdef PRINT_INTERMEDIATE
@@ -895,9 +931,7 @@ mxArray *sparse(const int *ii,const int *jj,
   for (int c = 2; c <= N; c++) jcS[c] += jcS[c-1];
 
   // irank must account for the previous accumulation
-  jcS--; /* (again, unit-offset in jj) */
-  for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]];
-  jcS++;
+  for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]-1];
   StopTime;
   GetTime(time_vec[4]);
 #ifdef PRINT_INTERMEDIATE
@@ -948,27 +982,33 @@ mxArray *sparse(const int *ii,const int *jj,
   // output
   mxArray *S;
   mwSize **jcS; // column pointer, one per thread
-  mwSize *jcS_; // final column pointer
   int *irank;   // inverse rank array of length len
   int *irankP;  // permuted version of irank
 
   mwSize **jrS; // accumulated "pessimistic" row counter
   int *rank;    // rank-array for rows
+  const int maxThreads = omp_get_max_threads();
+  int **hcol;   // cache memory for columns, one per possible thread
+  int rowThreads = 1;
+  int columnThreads = 1;
 
   // Part 1: count and accumulate indices to rows
   StartTime;
-  const int nThreads = omp_get_max_threads();
-  jrS = mxMalloc((nThreads+1)*sizeof(jrS[0]));
-  for (int k = 0; k <= nThreads; k++) {
-    jrS[k] = mxCalloc(M+1,sizeof(jrS[k][0]));
-    jrS[k]--; /* (unit-offset in ii) */
-  }
+  jrS = mxMalloc(((mwSize)maxThreads+1)*sizeof(jrS[0]));
+  for (mwSize k = 0; k <= (mwSize)maxThreads; k++)
+    jrS[k] = mxCalloc((mwSize)M+2,sizeof(jrS[k][0]));
+  rank = mxMalloc(len*sizeof(rank[0]));
 
-#pragma omp parallel
+#pragma omp parallel shared(rowThreads)
 {
+#pragma omp single
+  rowThreads = omp_get_num_threads();
+
   const int myId = omp_get_thread_num();
-  const int istart = len*myId/nThreads;
-  const int iend = len*(myId+1)/nThreads;
+  const int ibase = len/rowThreads,irem = len%rowThreads;
+  const int istart = ibase*myId+(myId < irem ? myId : irem);
+  const int iend = istart+ibase+(myId < irem);
+  int r;
   for (int i = istart; i < iend; i++)
     jrS[myId+1][ii[i]]++;
 
@@ -976,121 +1016,120 @@ mxArray *sparse(const int *ii,const int *jj,
 
   // accumulate jrS over the threads
 #pragma omp for
-  for (int r = 1; r <= M; r++)
-    for (int k = 1; k < nThreads; k++)
+  for (r = 1; r <= M; r++)
+    for (int k = 1; k < rowThreads; k++)
       jrS[k+1][r] += jrS[k][r];
 
   // serial accumulation in jrS[0]
 #pragma omp single
   for (int r = 1; r <= M; r++)
-    jrS[0][r+1] += jrS[0][r]+jrS[nThreads][r];
+    jrS[0][r+1] = jrS[0][r]+jrS[rowThreads][r];
 
   // determine a private jrS for each thread
 #pragma omp for
-  for (int r = 1; r <= M; r++)
-    for (int k = 1; k < nThreads; k++)
+  for (r = 1; r <= M; r++)
+    for (int k = 1; k < rowThreads; k++)
       jrS[k][r] += jrS[0][r];
-} // end parallel
-  StopTime;
-  GetTime(time_vec[1]);
 
-  // Part 2: build rank with the active use of jrS
-  StartTime;
-  rank = mxMalloc(len*sizeof(rank[0]));
-
-#pragma omp parallel
-{
-  const int myId = omp_get_thread_num();
-  const int istart = len*myId/nThreads;
-  const int iend = len*(myId+1)/nThreads;
+#pragma omp barrier
   for (int i = istart; i < iend; i++)
     rank[jrS[myId][ii[i]]++] = i;
   // rank now allows for row-wise traversal
 } // end parallel
   StopTime;
-  GetTime(time_vec[2]);
+  GetTime(time_vec[1]);
+#ifdef FSPARSE_TIME
+  time_vec[2] = 0.0;
+#endif
 
   /* Part 3: loop over input and make each column unique with respect
      to rowindices, building both a permuted index vector irankP and
      the final column pointer at the same time */
   StartTime;
-  jcS = mxMalloc((nThreads+1)*sizeof(jcS[0]));
-  for (int k = 0; k <= nThreads; k++)
-    jcS[k] = mxCalloc(N+1,sizeof(jcS[k][0]));
+  jcS = mxMalloc(((mwSize)maxThreads+1)*sizeof(jcS[0]));
+  for (mwSize k = 0; k <= (mwSize)maxThreads; k++)
+    jcS[k] = mxCalloc((mwSize)N+1,sizeof(jcS[k][0]));
   irankP = mxMalloc(len*sizeof(irankP[0]));
+  irank = NULL;
   if (2*(smod == len)+(sdiv == 1) != 3)
     // *** case not fully implemented
     irank = mxMalloc(len*sizeof(irank[0]));
+  hcol = mxMalloc((mwSize)maxThreads*sizeof(hcol[0]));
+  for (int k = 0; k < maxThreads; k++)
+    hcol[k] = mxCalloc((mwSize)N+1,sizeof(hcol[k][0]));
 
-#pragma omp parallel
+#pragma omp parallel shared(columnThreads)
 {
-  int *hcol; // cache memory for columns
-#pragma omp critical
-  hcol = mxCalloc(N,sizeof(hcol[0]));
-  hcol--; /* (unit-offset in jj) */
+  int c;
+
+#pragma omp single
+  columnThreads = omp_get_num_threads();
 
   const int myId = omp_get_thread_num();
-  const int rstart = 1+M*myId/nThreads;
-  const int rend = M*(myId+1)/nThreads;
+  int *myhcol = hcol[myId];
+  const int rbase = M/columnThreads,rrem = M%columnThreads;
+  const int rbegin = rbase*myId+(myId < rrem ? myId : rrem);
+  const int rstart = rbegin+1;
+  const int rend = rbegin+rbase+(myId < rrem);
   int istart;
   if (rstart == 1)
     istart = 0;
   else
-    istart = jrS[nThreads-1][rstart-1];
+    istart = jrS[rowThreads-1][rstart-1];
 
   // loop over segment of row indices
   for (int row = rstart,i = istart; row <= rend; row++)
     // loop over single row
-    for ( ; i < jrS[nThreads-1][row]; i++) {
+    for ( ; i < jrS[rowThreads-1][row]; i++) {
       const int ixijs = rank[i]; // index into input data triplet (ii,jj,sr)
       const int col = jj[ixijs]; // column index
 
       // new element?
-      if (hcol[col] < row) {
-      	hcol[col] = row;  // store row index
+      if (myhcol[col] < row) {
+	myhcol[col] = row;  // store row index
       	jcS[myId+1][col]++; // count it
       }
 
       // irankP keeps track of where it should go
       irankP[i] = jcS[myId+1][col]-1;
     }
-#pragma omp critical
-  mxFree(++hcol);
 
 #pragma omp barrier
 
   // accumulate jcS over the threads
 #pragma omp for
-  for (int c = 1; c <= N; c++)
-    for (int k = 1; k < nThreads; k++)
+  for (c = 1; c <= N; c++)
+    for (int k = 1; k < columnThreads; k++)
       jcS[k+1][c] += jcS[k][c];
 
   // serial accumulation in jcS[0]
 #pragma omp single
-{
-  for (int c = 1; c <= N; c++)
-    jcS[0][c] += jcS[0][c-1]+jcS[nThreads][c];
-  jcS[0]--; /* (unit-offset in jj) */
-}
+  for (c = 1; c <= N; c++)
+    jcS[0][c] = jcS[0][c-1]+jcS[columnThreads][c];
 
   // determine a private jcS for each thread
 #pragma omp for
-  for (int c = 1; c <= N; c++)
-    for (int k = 1; k < nThreads; k++)
-      jcS[k][c] += jcS[0][c];
+  for (c = 1; c <= N; c++)
+    for (int k = 1; k < columnThreads; k++)
+      jcS[k][c] += jcS[0][c-1];
 
   // irankP must now account to these changes to jcS
   if (rend >= 1)
-    for (int i = istart; i < jrS[nThreads-1][rend]; i++)
-      irankP[i] += jcS[myId][jj[rank[i]]];
+    for (int i = istart; i < jrS[rowThreads-1][rend]; i++) {
+      const int col = jj[rank[i]];
+      irankP[i] += myId == 0 ? jcS[0][col-1] : jcS[myId][col];
+    }
 
   if (2*(smod == len)+(sdiv == 1) != 3) {
     // *** case not fully implemented
     if (rend >= 1)
-      for (int i = istart; i < jrS[nThreads-1][rend]; i++)
+      for (int i = istart; i < jrS[rowThreads-1][rend]; i++)
 	irank[rank[i]] = irankP[i];
   }
 } // end parallel
+  for (int k = 0; k < maxThreads; k++)
+    mxFree(hcol[k]);
+  mxFree(hcol);
   StopTime;
   GetTime(time_vec[3]);
 
@@ -1101,7 +1140,6 @@ mxArray *sparse(const int *ii,const int *jj,
   GetTime(time_vec[4]);
 
   // allocate output
-  jcS[0]++;
   if (Nzmax == -1)
     Nzmax = jcS[0][N];
   else if (Nzmax < jcS[0][N])
@@ -1115,7 +1153,7 @@ mxArray *sparse(const int *ii,const int *jj,
   mxFree(mxGetJc(S));
   mxSetJc(S,jcS[0]);
   // free the remaining pointers
-  for (int k = 1; k <= nThreads; k++)
+  for (mwSize k = 1; k <= (mwSize)maxThreads; k++)
     mxFree(jcS[k]);
   mxFree(jcS);
 
@@ -1123,7 +1161,7 @@ mxArray *sparse(const int *ii,const int *jj,
   StartTime;
   if (2*(smod == len)+(sdiv == 1) == 3)
     sparse_insert(mxGetIr(S),mxGetPr(S),mxGetPi(S),
-		  irankP,rank,jrS[nThreads-1],ii,sr,si,smod,sdiv,len,M);
+			  irankP,rank,jrS[rowThreads-1],ii,sr,si,smod,sdiv,len,M);
   else
     sparse_insert(mxGetIr(S),mxGetPr(S),mxGetPi(S),
 		  irank,0,0,ii,sr,si,smod,sdiv,len,M);
@@ -1134,6 +1172,10 @@ mxArray *sparse(const int *ii,const int *jj,
   if (2*(smod == len)+(sdiv == 1) != 3)
     mxFree(irank);
   mxFree(irankP);
+  mxFree(rank);
+  for (mwSize k = 0; k <= (mwSize)maxThreads; k++)
+    mxFree(jrS[k]);
+  mxFree(jrS);
 
   return S;
 }
@@ -1248,9 +1290,7 @@ mxArray *sparse_nosort(const int *ii,const int *jj,
   for (int c = 2; c <= N; c++) jcS[c] += jcS[c-1];
 
   /* account for the accumulation of indices */
-  jcS--;
-  for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]];
-  jcS++;
+  for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]-1];
 
   /* allocate output */
   if (Nzmax == -1)
@@ -1299,8 +1339,7 @@ mxArray *sparse_nosort(const int *ii,const int *jj,
 
   /* allocate index- and help-pointers */
   irank = mxMalloc(len*sizeof(irank[0]));
-  hrow = mxCalloc(M,sizeof(hrow[0]));
-  hrow--; /* unit offset in ii */
+  hrow = mxCalloc(M+1,sizeof(hrow[0]));
 
   /* loop over input and make each column unique with respect to
      rowindices, building both an index vector irank and the final
@@ -1319,7 +1358,7 @@ mxArray *sparse_nosort(const int *ii,const int *jj,
       irank[ixijs] = hrow[row]-1;
     }
   }
-  mxFree(++hrow);
+  mxFree(hrow);
   mxFree(rank);
 
   /* allocate output */
@@ -1379,38 +1418,34 @@ mxArray *gsparse(const int *ii,int imod,
   for (int r = 2; r <= M; r++) irS[r] += irS[r-1];
 
   rank = mxMalloc(len*sizeof(rank[0]));
-  irS--;
-  for (int i = 0; i < len; i++) rank[irS[ii[i%imod]]++] = i;
+  for (int i = 0; i < len; i++) rank[irS[ii[i%imod]-1]++] = i;
 
   jcS = mxCalloc(N+1,sizeof(jcS[0]));
   hcol = mxCalloc(N,sizeof(hcol[0]));
-  hcol--;
   irank = mxMalloc(len*sizeof(irank[0]));
   for (int row = 1,i = 0; row <= M; row++)
-    for ( ; i < irS[row]; i++) {
+    for ( ; i < irS[row-1]; i++) {
       const int ixijs = rank[i];
       const int col = jj[ixijs/jdiv];
 
-      if (hcol[col] < row) {
-	hcol[col] = row;
+      if (hcol[col-1] < row) {
+	hcol[col-1] = row;
 	jcS[col]++;
       }
 
       irank[ixijs] = jcS[col]-1;
     }
-  mxFree(++irS);
+  mxFree(irS);
   mxFree(rank);
-  mxFree(++hcol);
+  mxFree(hcol);
   for (int c = 2; c <= N; c++) jcS[c] += jcS[c-1];
 
-  jcS--;
   /* for (int i = 0; i < len; i++) irank[i] += jcS[jj[i/jdiv]]; */
   if (jdiv == 1)
-    for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]];
+    for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]-1];
   else
     for (int c = 0, i = 0; c < len/jdiv; c++)
-      for ( ; i < (c+1)*jdiv; i++) irank[i] += jcS[jj[c]];
-  jcS++;
+      for ( ; i < (c+1)*jdiv; i++) irank[i] += jcS[jj[c]-1];
 
   if (Nzmax == -1)
     Nzmax = jcS[N];
@@ -1456,10 +1491,9 @@ mxArray *gsparse(const int *ii,int imod,
   for (int r = 2; r <= M; r++) irS[r] += irS[r-1];
 
   irank = mxMalloc(len*sizeof(irank[0]));
-  irS--;
   for (int i = 0; i < len; i++)
-    irank[irS[ii[i%imod]]++] = i;
-  mxFree(++irS);
+    irank[irS[ii[i%imod]-1]++] = i;
+  mxFree(irS);
 
   rank = mxMalloc(len*sizeof(rank[0]));
   jcS--;
@@ -1579,14 +1613,12 @@ mxArray *gsparse_nosort(const int *ii,int imod,
   for (int c = 2; c <= N; c++) jcS[c] += jcS[c-1];
 
   /* account for the accumulation of indices */
-  jcS--;
   /* for (int i = 0; i < len; i++) irank[i] += jcS[jj[i/jdiv]]; */
   if (jdiv == 1)
-    for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]];
+    for (int i = 0; i < len; i++) irank[i] += jcS[jj[i]-1];
   else
     for (int c = 0, i = 0; c < len/jdiv; c++)
-      for ( ; i < (c+1)*jdiv; i++) irank[i] += jcS[jj[c]];
-  jcS++;
+      for ( ; i < (c+1)*jdiv; i++) irank[i] += jcS[jj[c]-1];
 
   /* allocate output */
   if (Nzmax == -1)
@@ -1633,8 +1665,7 @@ mxArray *gsparse_nosort(const int *ii,int imod,
   for (int i = 0; i < len; i++) rank[jcS[jj[i/jdiv]]++] = i;
 
   irank = mxMalloc(len*sizeof(irank[0]));
-  hrow = mxCalloc(M,sizeof(hrow[0]));
-  hrow--;
+  hrow = mxCalloc(M+1,sizeof(hrow[0]));
 
   for (int i = 0,col = jj[rank[0]/jdiv]; ; ) {
     const int begin = jcS[col-1];
@@ -1654,7 +1685,7 @@ mxArray *gsparse_nosort(const int *ii,int imod,
       break;
     }
   }
-  mxFree(++hrow);
+  mxFree(hrow);
   mxFree(rank);
 
   if (Nzmax == -1)
