@@ -96,6 +96,12 @@ configurations. Those checks establish the tested build/runtime behavior; they
 are not a claim that every unsupported runtime, malformed MEX input, or
 numerical edge case has been exhaustively tested.
 
+Experimental MATLAB OpenMP bundles, when included in a release, have a narrower
+tested scope than the baseline MATLAB bundles. They are built and validated only
+on the OpenMP runtime/toolchain combinations documented in `README.md`; their
+presence in a release does not extend support to other OpenMP runtimes or MATLAB
+versions.
+
 When reproducing historical behavior, use the documentation and source from the
 specific release tag rather than treating all `v0.1.x` releases as one frozen
 source line.

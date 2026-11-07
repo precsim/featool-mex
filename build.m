@@ -7,7 +7,8 @@ function info = build(varargin)
 %   of target names.
 %
 %   BUILD(..., 'openmp', true) enables OpenMP for targets that declare
-%   OpenMP support. Baseline/release builds should leave this false.
+%   OpenMP support. Baseline builds leave this false; experimental OpenMP
+%   release variants enable it explicitly.
 %   On macOS, BUILD(..., 'openmproot', DIR) supplies an OpenMP header prefix
 %   containing include/, and BUILD(..., 'openmplib', FILE) supplies the
 %   OpenMP runtime already used by MATLAB.

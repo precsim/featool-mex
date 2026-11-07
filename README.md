@@ -33,8 +33,9 @@ Choose exactly one ZIP for your runtime and platform:
 
 Do not mix MATLAB and Octave bundles. MATLAB uses platform-specific MEX extensions such as `.mexa64`, `.mexw64`, `.mexmaci64`, and `.mexmaca64`; the Octave bundles contain Octave `.mex` binaries.
 
-MATLAB releases also contain optional **experimental OpenMP** bundles. Use one
-of these instead of, not alongside, the corresponding baseline MATLAB bundle:
+When present in a GitHub Release, optional **experimental OpenMP** MATLAB
+bundles use the following asset names. Use one of these instead of, not
+alongside, the corresponding baseline MATLAB bundle:
 
 | Platform | Experimental OpenMP release asset |
 | --- | --- |
@@ -45,7 +46,8 @@ of these instead of, not alongside, the corresponding baseline MATLAB bundle:
 
 The serial MATLAB bundles remain the default portability-oriented release
 artifacts. OpenMP bundles are built and validated separately and may have a
-narrower runtime/toolchain compatibility range.
+narrower runtime/toolchain compatibility range. Check the release asset list;
+older releases may not contain the experimental OpenMP bundles.
 
 ## Installation
 
@@ -116,10 +118,10 @@ The `iluk.m` MATLAB/Octave wrapper is included with the binaries. Release bundle
 - `SHA256SUMS` — checksums for the files inside the extracted bundle.
 - A platform ABI report such as `linux-ABI.json`, `windows-ABI.txt`, or `macos-ABI.txt`.
 
-Release binaries are serial builds; OpenMP is disabled for the published baseline.
+Baseline MATLAB release binaries are serial builds with OpenMP disabled.
 
-On `feat/openmp-preview`, CI also builds MATLAB OpenMP variants on Linux,
-Windows, Intel macOS, and Apple silicon macOS. The OpenMP smoke job requests
+CI and the release workflow also build experimental MATLAB OpenMP variants on
+Linux, Windows, Intel macOS, and Apple silicon macOS. The OpenMP smoke job requests
 eight threads while limiting the runtime team to two (`OMP_NUM_THREADS=8`,
 `OMP_THREAD_LIMIT=2`) to exercise code that must use the actual OpenMP team size
 rather than assuming the requested size was created. macOS builds use Homebrew's
@@ -175,7 +177,7 @@ The exact source commit, compiler information, runtime used for the build, and A
 
 ## Release process
 
-Version tags matching `v*` trigger `.github/workflows/mex-release.yml`. A successful tagged release performs the complete MATLAB and Octave build matrix, same-runtime smoke tests, ABI audits, fresh-runner downloaded-artifact tests, checksum verification, bundle assembly, and GitHub Release publication.
+Version tags matching `v*` trigger `.github/workflows/mex-release.yml`. A successful tagged release builds the baseline MATLAB and Octave matrix plus the experimental MATLAB OpenMP variants, then performs same-runtime smoke tests, ABI audits, fresh-runner downloaded-artifact tests, checksum verification, bundle assembly, and GitHub Release publication.
 
 Normal pull requests use the hosted MEX CI workflow before changes are merged. No self-hosted build machine is required by the active build or release path.
 
