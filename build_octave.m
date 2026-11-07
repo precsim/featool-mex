@@ -75,7 +75,12 @@ for i = 1:length(targets)
     end
 
     output_file = fullfile(opt.outdir, [target.name '.' mx]);
-    args = {'--mex', ['-I' compat_include], '-include', 'mex_compat.h'};
+    % Baseline sources include MATLAB compatibility headers such as matrix.h
+    % with quotes.  Prefer our Octave shims for quoted includes before
+    % Octave's own C++-oriented compatibility headers, while retaining -I for
+    % ordinary include lookup.
+    args = {'--mex', ['-iquote' compat_include], ['-I' compat_include], ...
+        '-include', 'mex_compat.h'};
     if ~opt.silent
         args{end + 1} = '-v';
         fprintf(1, 'Building Octave target %s\n', target.name);
