@@ -133,6 +133,7 @@ for i = 1:length(targets)
                 'compilercommand is currently supported only for Linux MEX builds.');
         end
         args{end + 1} = ['GCC=' compiler_command];
+        args{end + 1} = 'LDFLAGS=$LDFLAGS -Wl,--as-needed';
     end
     if opt.openmp && target.openmp
         args = [args openmp_args(target.language, opt.mx, mexopts_file, ...
