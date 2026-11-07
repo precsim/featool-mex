@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 MANIFEST = ROOT / "build_manifest.m"
 OCTAVE_BLAS_COMPAT = ROOT / "compat" / "octave" / "blas.h"
+OCTAVE_MATRIX_COMPAT = ROOT / "compat" / "octave" / "matrix.h"
 OCTAVE_MEX_COMPAT = ROOT / "compat" / "octave" / "mex_compat.h"
 
 TARGET_RE = re.compile(
@@ -118,6 +119,10 @@ def main() -> int:
         has_blas_header = '"blas.h"' in combined_text or "<blas.h>" in combined_text
         if has_blas_header and not OCTAVE_BLAS_COMPAT.is_file():
             fail("Octave compatibility header is missing: compat/octave/blas.h")
+
+        has_matrix_header = '"matrix.h"' in combined_text or "<matrix.h>" in combined_text
+        if has_matrix_header and not OCTAVE_MATRIX_COMPAT.is_file():
+            fail("Octave compatibility header is missing: compat/octave/matrix.h")
 
         if not OCTAVE_MEX_COMPAT.is_file():
             fail("Octave compatibility header is missing: compat/octave/mex_compat.h")
