@@ -1,24 +1,25 @@
 #include "mex.h"
-#include "matrix.h"
+#include <stddef.h>
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
-#ifdef __GNUC__
+#if defined(__GNUC__)
 #define restrict __restrict__
-#elif __INTEL_COMPILER
-#define restrict restrict
+#elif defined(__INTEL_COMPILER)
+#define restrict __restrict
+#elif defined(_MSC_VER)
+#define restrict __restrict
 #endif
 
 /** earrind.c - Extract indexed values from array
 
     PC = EARRIND( P, C, X ) Extracts values PC from (row) array P with
     indexes C. C are indices to rows in P, or if C = [i1,i2] extracts
-    from rows i1 to i2. With optional X given, the rows are summed and
-    multiplied with X(row_i).
-
-    Note! Few checks are performed on C that indices to P are valid.
+    from rows i1 to i2. With optional X given, returns P(C,:)*X(:).
+    A scalar X is broadcast to all columns; otherwise numel(X) must equal
+    size(P,2).
 
     Build with intel compiler:
 
@@ -29,35 +30,45 @@
 */
 
 
-void dcopy(const double *restrict p1, double *restrict p2, const int n) {
-  int i;
+void dcopy(const double *restrict p1, double *restrict p2, const mwSize n) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
+  for (i = 0; i < (ptrdiff_t)n; i++) {
     p2[i] = p1[i];
   }
 }
 
-void dcopy_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const int n) {
-  int i;
+void dcopy_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const mwSize n) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
-    p2[i] = p1[(int)ind[i]];
+  for (i = 0; i < (ptrdiff_t)n; i++) {
+    p2[i] = p1[(mwIndex)ind[i]-1];
   }
 }
 
-void dsumx(const double *restrict p1, double *restrict p2, const int n, double x) {
-  int i;
+void dsumx(const double *restrict p1, double *restrict p2, const mwSize n, double x) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
+  for (i = 0; i < (ptrdiff_t)n; i++) {
     p2[i] += x * p1[i];
   }
 }
 
-void dsumx_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const int n, double x) {
-  int i;
+void dsumx_dind(const double *restrict p1, double *restrict p2, const double *restrict ind, const mwSize n, double x) {
+  ptrdiff_t i;
 #pragma omp parallel for private(i)
-  for (i = 0; i < n; i++) {
-    p2[i] += x * p1[(int)ind[i]];
+  for (i = 0; i < (ptrdiff_t)n; i++) {
+    p2[i] += x * p1[(mwIndex)ind[i]-1];
+  }
+}
+
+void validate_indices(const double *restrict ind, const mwSize n, const mwSize limit) {
+  mwSize i;
+  for (i = 0; i < n; ++i) {
+    const double value = ind[i];
+    if (!(value >= 1.0 && value <= (double)limit &&
+          value == (double)(mwIndex)value))
+      mexErrMsgTxt("Index values must be finite positive integers within array bounds.");
   }
 }
 
@@ -67,13 +78,13 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   if (nrhs < 2 || nrhs > 3)
     mexErrMsgTxt("Expecting two or three input arguments.");
 
-  if (mxIsSparse(prhs[0]) || !mxIsDouble(prhs[0]))
+  if (mxIsSparse(prhs[0]) || mxIsComplex(prhs[0]) || !mxIsDouble(prhs[0]))
     mexErrMsgTxt("Expecting non-sparse double array as first input.");
 
-  if (mxIsSparse(prhs[1]) || !mxIsDouble(prhs[1]))
+  if (mxIsSparse(prhs[1]) || mxIsComplex(prhs[1]) || !mxIsDouble(prhs[1]))
     mexErrMsgTxt("Expecting non-sparse double array as second input.");
 
-  if (nrhs == 3 && (mxIsSparse(prhs[2]) || !mxIsDouble(prhs[2])))
+  if (nrhs == 3 && (mxIsSparse(prhs[2]) || mxIsComplex(prhs[2]) || !mxIsDouble(prhs[2])))
     mexErrMsgTxt("Expecting non-sparse double array as third input.");
 
   if (nlhs != 1)
@@ -84,41 +95,48 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   const mwSize np = mxGetN(prhs[0]);   // cols
 
   const double* c = (double *)mxGetData(prhs[1]);
-  const int mc = (int)mxGetM(prhs[1]);
-  int nc = (int)mxGetN(prhs[1]);
-  if (!(mc == 1 || nc==1))
+  const mwSize mc = mxGetM(prhs[1]);
+  const mwSize cc = mxGetN(prhs[1]);
+  const mwSize nind = mxGetNumberOfElements(prhs[1]);
+  if (nind != 0 && !(mc == 1 || cc == 1))
     mexErrMsgTxt("Second argument must be an index vector.");
-  int i1 = -1; int i2 = -1;
-  if (mc*nc == 2) {
-    i1 = (int)c[0] - 1;
-    i2 = (int)c[1] - 1;
-    if (i1 < 0 || i2 > mp-1 || i2 < i1)
-      mexErrMsgTxt("Pointer out of bounds");
-    nc = i2 - i1 + 1;
+  mwSize nc = nind;
+  mwIndex i1 = 0;
+  int use_range = 0;
+  if (nind == 2) {
+    mwIndex i2;
+    validate_indices(c, nind, mp);
+    i1 = (mwIndex)c[0] - 1;
+    i2 = (mwIndex)c[1] - 1;
+    if (i2 < i1)
+      mexErrMsgTxt("Range end must not precede range start.");
+    nc = (mwSize)(i2 - i1 + 1);
+    use_range = 1;
   } else {
-    nc = mc*nc;
+    validate_indices(c, nind, mp);
   }
 
 
   if (nrhs == 2) {
     const mwSize dims[2] = {nc, np};
     plhs[0] = mxCreateNumericArray(2, dims, mxDOUBLE_CLASS, mxREAL);
+    if (nc == 0)
+      return;
     double* pc = (double *)mxGetData(plhs[0]);
 
-    if (i1 >= 0) {
-      for (int j = 0; j < np; j++) {
-        int off_p  = j*mp + i1;
-        int off_pc = j*nc;
-        if (off_p>mp*np-1)
-          mexErrMsgTxt("Pointer out of bounds");
-
+    if (use_range) {
+      mwSize j;
+      for (j = 0; j < np; j++) {
+        const mwSize off_p  = j*mp + (mwSize)i1;
+        const mwSize off_pc = j*nc;
         dcopy(p + off_p, pc + off_pc, nc);
       }
 
     } else {   // Use indices c
-      for (int j = 0; j < np; j++) {
-        int off_p  = j*mp - 1;   // correct for 1 indexed c
-        int off_pc = j*nc;
+      mwSize j;
+      for (j = 0; j < np; j++) {
+        const mwSize off_p  = j*mp;
+        const mwSize off_pc = j*nc;
 
         dcopy_dind(p + off_p, pc + off_pc, c, nc);
       }
@@ -127,27 +145,28 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   } else {   // Scale with x and sum rows
     const double* x = (double *)mxGetData(prhs[2]);
     const mwSize nx = mxGetNumberOfElements(prhs[2]);
+    if (!(nx == 1 || nx == np))
+      mexErrMsgTxt("Third argument must be scalar or contain one value for each column of the first input.");
 
     const mwSize dims[2] = {nc, 1};
     plhs[0] = mxCreateNumericArray(2, dims, mxDOUBLE_CLASS, mxREAL);
+    if (nc == 0)
+      return;
     double* pc = (double *)mxGetData(plhs[0]);
 
-    double xj = 1.;
-    if (i1 >= 0) {
-      for (int j = 0; j < np; j++) {
-        int off_p = j*mp + i1;
-        if (off_p>mp*np-1)
-          mexErrMsgTxt("Pointer out of bounds");
-        if (j < nx) { xj = x[j]; }
-
+    if (use_range) {
+      mwSize j;
+      for (j = 0; j < np; j++) {
+        const mwSize off_p = j*mp + (mwSize)i1;
+        const double xj = nx == 1 ? x[0] : x[j];
         dsumx(p + off_p, pc, nc, xj);
       }
 
     } else {   // Use indices c
-      for (int j = 0; j < np; j++) {
-        int off_p = j*mp - 1;   // correct for 1 indexed c
-        if (j < nx) { xj = x[j]; }
-
+      mwSize j;
+      for (j = 0; j < np; j++) {
+        const mwSize off_p = j*mp;
+        const double xj = nx == 1 ? x[0] : x[j];
         dsumx_dind(p + off_p, pc, c, nc, xj);
       }
     }

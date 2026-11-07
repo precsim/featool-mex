@@ -6,17 +6,15 @@
 #include "mex.h"
 #include <stdio.h>
 #include <math.h>
-#include "blas.h"
 #include <string.h>
 #include "src_dep/Tools.h"
+#include "src_dep/mex_size_guard.h"
 
 #define INVJAC(i,j,k) invjac[i+(j+k*dim)*noe]
 #define GRADREFPHIV(i,j,k) gradrefphiV[i+(j+k*NumQuadPoints)*nlnV]
 #define GRADREFPHIP(i,j,k) gradrefphiP[i+(j+k*NumQuadPoints)*nlnP]
 #ifdef _OPENMP
 #include <omp.h>
-#else
-#warning "OpenMP not enabled. Compile with mex CFD_assembler_C_omp.c CFLAGS="\$CFLAGS -fopenmp" LDFLAGS="\$LDFLAGS -fopenmp""
 #endif
 
 
@@ -2046,16 +2044,42 @@ void AssembleSUPG_ImplicitSteady(mxArray* plhs[], const mxArray* prhs[])
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 {
 
+    if (nrhs < 1 || !mxIsChar(prhs[0])) {
+        mexErrMsgTxt("First input must be an assembly name.");
+    }
     char *Assembly_name = mxArrayToString(prhs[0]);
+    if (Assembly_name == NULL) {
+        mexErrMsgTxt("Could not read assembly name.");
+    }
+    mexRequireIntAddressableInputs(nrhs, prhs);
+    int recognized = 0;
 
     if (strcmp(Assembly_name, "Stokes")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=13) {
             mexErrMsgTxt("13 inputs are required.");
-        } else if(nlhs>3) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=3) {
+            mexErrMsgTxt("Exactly 3 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[5], "pressure local node count");
+        (void)mexCheckedPositiveIntScalar(prhs[6], "velocity degree-of-freedom count");
+        int nln = mexCheckedAddInt(nlnV, nlnP, "combined local node count");
+        (void)mexCheckedMulInt(nln, nln, "combined local matrix size");
+        int dim2 = mexCheckedMulInt(dim, dim, "spatial block size");
+        int vv = mexCheckedMulInt(mexCheckedMulInt(nlnV, nlnV, "velocity block size"),
+                                  dim2, "velocity block size");
+        int vp = mexCheckedMulInt(
+            mexCheckedMulInt(mexCheckedMulInt(2, nlnV, "mixed block size"),
+                             nlnP, "mixed block size"),
+            dim, "mixed block size");
+        int local_size = mexCheckedAddInt(vv, vp, "local Stokes matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled Stokes output size");
 
         AssembleStokes(plhs, prhs);
     }
@@ -2063,88 +2087,221 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     if (strcmp(Assembly_name, "convective_Oseen")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=12) {
             mexErrMsgTxt("12 inputs are required.");
-        } else if(nlhs>3) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=3) {
+            mexErrMsgTxt("Exactly 3 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int local_size = mexCheckedMulInt(
+            mexCheckedMulInt(nlnV, nlnV, "local convective matrix size"),
+            dim, "local convective matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled convective output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[3], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Element connectivity");
 
         AssembleConvective_Oseen(plhs, prhs);
     }
 
     if (strcmp(Assembly_name, "convective")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=12) {
             mexErrMsgTxt("12 inputs are required.");
-        } else if(nlhs>6) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=6) {
+            mexErrMsgTxt("Exactly 6 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int nlnV2 = mexCheckedMulInt(nlnV, nlnV, "local convective matrix size");
+        int local_size = mexCheckedMulInt(
+            mexCheckedMulInt(nlnV2, dim, "local convective matrix size"),
+            dim, "local convective matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled convective output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[3], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Element connectivity");
 
         AssembleConvective(plhs, prhs);
     }
 
     if (strcmp(Assembly_name, "convectiveALE")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=13) {
             mexErrMsgTxt("13 inputs are required.");
-        } else if(nlhs>6) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=6) {
+            mexErrMsgTxt("Exactly 6 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[2], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[3]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[4], "velocity local node count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[5], "velocity degree-of-freedom count");
+        int nlnV2 = mexCheckedMulInt(nlnV, nlnV, "local ALE matrix size");
+        int local_size = mexCheckedMulInt(
+            mexCheckedMulInt(nlnV2, dim, "local ALE matrix size"),
+            dim, "local ALE matrix size");
+        (void)mexCheckedMulInt(noe, local_size, "assembled ALE output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[3], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Element connectivity");
 
         AssembleConvectiveALE(plhs, prhs);
     }
 
     if (strcmp(Assembly_name, "SUPG_SemiImplicit")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=20) {
             mexErrMsgTxt("20 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_SemiImplicit(plhs, prhs);
     }
 
     if (strcmp(Assembly_name, "SUPG_Implicit")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=20) {
             mexErrMsgTxt("20 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_Implicit(plhs, prhs);
     }
 
     if (strcmp(Assembly_name, "SUPG_ImplicitALE")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=22) {
             mexErrMsgTxt("22 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_ImplicitALE(plhs, prhs);
     }
 
     if (strcmp(Assembly_name, "SUPG_ImplicitSteady")==0)
     {
+        recognized = 1;
         /* Check for proper number of arguments */
         if(nrhs!=17) {
             mexErrMsgTxt("17 inputs are required.");
-        } else if(nlhs>5) {
-            mexErrMsgTxt("Too many output arguments.");
+        } else if(nlhs!=5) {
+            mexErrMsgTxt("Exactly 5 output arguments are required.");
         }
+
+        int dim = mexCheckedPositiveIntScalar(prhs[1], "dimension");
+        int noe = mexCheckedSizeToInt(mxGetN(prhs[2]), "element count");
+        int nlnV = mexCheckedPositiveIntScalar(prhs[8], "velocity local node count");
+        int nlnP = mexCheckedPositiveIntScalar(prhs[9], "pressure local node count");
+        int velocity_dofs = mexCheckedPositiveIntScalar(prhs[10], "velocity degree-of-freedom count");
+        int pressure_dofs = mexCheckedPositiveIntScalar(prhs[11], "pressure degree-of-freedom count");
+        (void)mexCheckedAddInt(velocity_dofs, pressure_dofs,
+                               "combined degree-of-freedom count");
+        int local_rhs = mexCheckedAddInt(
+            mexCheckedMulInt(dim, nlnV, "local SUPG vector size"),
+            nlnP, "local SUPG vector size");
+        int local_matrix = mexCheckedMulInt(local_rhs, local_rhs, "local SUPG matrix size");
+        (void)mexCheckedMulInt(noe, local_matrix, "assembled SUPG matrix output size");
+        (void)mexCheckedMulInt(noe, local_rhs, "assembled SUPG vector output size");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnV,
+                                          (mwSize)(velocity_dofs/dim),
+                                          "Velocity element connectivity");
+        mexRequireOneBasedDoubleIndexRows(prhs[2], (mwSize)nlnP,
+                                          (mwSize)pressure_dofs,
+                                          "Pressure element connectivity");
 
         AssembleSUPG_ImplicitSteady(plhs, prhs);
     }
 
+    if (!recognized) {
+        mxFree(Assembly_name);
+        mexErrMsgTxt("Unknown assembly name.");
+    }
     mxFree(Assembly_name);
 }
 /*************************************************************************/

@@ -4,8 +4,6 @@
 #include <ctime>
 #include <vector>
 
-#define CHECK_INPUT
-#undef  CHECK_INPUT
 #define ENABLE_PROFILE
 #undef ENABLE_PROFILE
 
@@ -67,45 +65,65 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
         double *L, *U;
 
     // check input and output
-        #ifdef CHECK_INPUT
         if (nrhs != 2) {
            mexErrMsgTxt("Two input arguments required");
         }
         if (nlhs != 2) {
            mexErrMsgTxt("Only two outputs");
         }
-        #endif
 
     // sparse matrix A
-        #ifdef CHECK_INPUT
-        if (!(mxIsSparse(prhs[0])) || mxIsComplex(prhs[0]) || mxIsEmpty(prhs[0])) {
-        mexErrMsgTxt("Input matrix must be nonempty, real, and sparse");
+        if (!(mxIsSparse(prhs[0])) || !(mxIsDouble(prhs[0])) ||
+                mxIsComplex(prhs[0]) || mxIsEmpty(prhs[0])) {
+        mexErrMsgTxt("Input matrix must be nonempty, real, sparse, and double");
         }
-        #endif
         A = mxGetPr(prhs[0]);              // real vector for A
         prowA = mxGetIr(prhs[0]);          // row indices for elements of A
         pcolindexA = mxGetJc(prhs[0]); // index into the columns
         N = mxGetN(prhs[0]);           // number of columns of A
-        #ifdef CHECK_INPUT
         if(N != mxGetM(prhs[0])) {
                 mexErrMsgTxt("Input matrix must be square");
         }
-        #endif
 
         // sparse matrix Lvl
-        #ifdef CHECK_INPUT
-        if (!(mxIsSparse(prhs[1])) || mxIsComplex(prhs[1]) || mxIsEmpty(prhs[1])) {
-        mexErrMsgTxt("Input matrix of levels must be nonempty, real, and sparse");
+        if (!(mxIsSparse(prhs[1])) || !(mxIsDouble(prhs[1])) ||
+                mxIsComplex(prhs[1]) || mxIsEmpty(prhs[1])) {
+        mexErrMsgTxt("Input matrix of levels must be nonempty, real, sparse, and double");
         }
-        #endif
-        Lvl = mxGetPr(prhs[1]);            // real vector for A
+        Lvl = mxGetPr(prhs[1]);
         prowLvl = mxGetIr(prhs[1]);        // row indices for elements of A
         pcolindexLvl = mxGetJc(prhs[1]); // index into the columns
-        #ifdef CHECK_INPUT
-        if(mxGetN != N || N != mxGetM(prhs[1])) {
+        if(mxGetN(prhs[1]) != N || N != mxGetM(prhs[1])) {
                 mexErrMsgTxt("Input matrix must be square and of order N");
         }
-        #endif
+
+        // A level matrix returned by iluk_Cmex stores original A entries at shifted
+        // level 1 and generated fill entries at levels >= 2.  Reuse is valid only
+        // when the current A sparsity pattern exactly matches those level-1 entries.
+        // This also guarantees that capacities derived from Lvl are sufficient for A.
+        for(mwIndex j = 0; j != N; ++j) {
+                mwIndex a = pcolindexA[j];
+                mwIndex a_end = pcolindexA[j + 1];
+                mwIndex lvl = pcolindexLvl[j];
+                mwIndex lvl_end = pcolindexLvl[j + 1];
+
+                while(a < a_end || lvl < lvl_end) {
+                        while(lvl < lvl_end && Lvl[lvl] != 1.0) {
+                                ++lvl;
+                        }
+                        if(a == a_end) {
+                                if(lvl != lvl_end) {
+                                        mexErrMsgTxt("Level-1 pattern must match the sparsity pattern of A");
+                                }
+                                break;
+                        }
+                        if(lvl == lvl_end || prowLvl[lvl] != prowA[a]) {
+                                mexErrMsgTxt("Level-1 pattern must match the sparsity pattern of A");
+                        }
+                        ++a;
+                        ++lvl;
+                }
+        }
 
         // count the number of nonzeros in L and U
         nnzL = 0;
@@ -138,7 +156,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 U[j] = A[j];
         }
         // check that first nonzero in first row of U is a diagonal element
-        if(prowU[0] != 0) {
+        if(pcolindexU[0] == pcolindexU[1] || prowU[pcolindexU[0]] != 0 ||
+                U[pcolindexU[0]] == 0.0) {
                 mexErrMsgTxt("U has zero diagonal element");
         }
         pcolindexL[0] = 0;
@@ -167,7 +186,13 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                 }
                 mwIndex i = pcolindexLvl[j];
                 while(i < pcolindexLvl[j + 1] && prowLvl[i] < j) {
-                        double alpha = work[prowLvl[i]] / U[pcolindexU[prowLvl[i]]];
+                        mwIndex pivot_row = prowLvl[i];
+                        mwIndex pivot_start = pcolindexU[pivot_row];
+                        mwIndex pivot_end = pcolindexU[pivot_row + 1];
+                        if(pivot_start == pivot_end || prowU[pivot_start] != pivot_row || U[pivot_start] == 0.0) {
+                                mexErrMsgTxt("U has zero diagonal element");
+                        }
+                        double alpha = work[pivot_row] / U[pivot_start];
                         work[prowLvl[i]] = alpha;
                         for(mwIndex k = pcolindexU[prowLvl[i]] + 1; k != pcolindexU[prowLvl[i] + 1]; ++k) {
                                 // is prowU[k] a permitted fill-in?
@@ -199,13 +224,13 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
                         }
                         work_lev[prowLvl[k]] = 0;
                 }
+                pcolindexU[j + 1] = nnzU;
                 // check that first nonzero in row j of U is a diagonal element
-                if(prowU[pcolindexU[j]] != j) {
+                if(pcolindexU[j] == pcolindexU[j + 1] || prowU[pcolindexU[j]] != j) {
                         mexErrMsgTxt("U has a zero diagonal element");
                 }
                 L[nnzL] = 1.0;
                 prowL[nnzL++] = j;
-                pcolindexU[j + 1] = nnzU;
                 pcolindexL[j + 1] = nnzL;
         }
         } // artificial scope to force destruction of work object
