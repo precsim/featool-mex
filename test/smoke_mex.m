@@ -549,6 +549,15 @@ check_equal(rows, [1; 1; 2], 0, 'assemble_f rows');
 check_equal(cols, [1; 2; 1], 0, 'assemble_f columns');
 check_equal(coef, [2; -1; 1], 1e-12, 'assemble_f values');
 
+[supg_rows1, supg_cols1, supg_coef1, supg_rrows1, supg_rcoef1] = ... %#ok<ASGLU>
+    assemble_f('SUPG_SemiImplicit', 1, 1, 1, 1, 1, 1, 1, ...
+    1, 1, 1, 1, 1, 10, 0, 1, 0, 1, 0, 1);
+[supg_rows2, supg_cols2, supg_coef2, supg_rrows2, supg_rcoef2] = ... %#ok<ASGLU>
+    assemble_f('SUPG_SemiImplicit', 1, 1, 1, 1, 1, 1, 1, ...
+    1, 1, 1, 1, 1, 10, 0, 2, 0, 1, 0, 1);
+check_equal(supg_coef2(1), 2 * supg_coef1(1), 1e-10, ...
+    'assemble_f SUPG semi-implicit density scaling');
+
 [rows, cols, coef] = assemble_f('convective_Oseen', 1, 1, 1, 1, 1, ...
     1, 1, 1, 1, 1, 1);
 check_equal(rows, 1, 0, 'assemble_f convective rows');
