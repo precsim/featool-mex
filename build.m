@@ -8,6 +8,8 @@ function info = build(varargin)
 %
 %   BUILD(..., 'openmp', true) enables OpenMP for targets that declare
 %   OpenMP support. Baseline/release builds should leave this false.
+%   On macOS, BUILD(..., 'openmproot', DIR) supplies a libomp installation
+%   prefix containing include/ and lib/ directories.
 %
 %   BUILD(..., 'api', 'legacy') selects the separate-complex Matrix API.
 %   On MATLAB versions that understand -R2017b, BUILD passes -R2017b.
@@ -39,6 +41,7 @@ optdef.srcdir   = fullfile(rootdir, 'src');
 optdef.outdir   = '';
 optdef.target   = 'all';
 optdef.openmp   = false;
+optdef.openmproot = '';
 optdef.silent   = false;
 optdef.api      = 'legacy';
 optdef.r2018a   = false;
@@ -137,7 +140,8 @@ for i = 1:length(targets)
     end
     if opt.openmp && target.openmp
         args = [args openmp_args(target.language, opt.mx, mexopts_file, ...
-            opt.compiler, ~isempty(explicit_mexopts_file))]; %#ok<AGROW>
+            opt.compiler, ~isempty(explicit_mexopts_file), ...
+            opt.openmproot)]; %#ok<AGROW>
     end
 
     if ~isempty(mexopts_file)
@@ -302,7 +306,8 @@ end
 end
 
 
-function args = openmp_args(language, mx, mexopts, compiler_name, explicit_mexopts)
+function args = openmp_args(language, mx, mexopts, compiler_name, ...
+                            explicit_mexopts, openmp_root)
 if explicit_mexopts
     args = {};
     return
@@ -330,8 +335,25 @@ elseif strncmpi(mx, 'mexa', 4)
         args = {'CFLAGS=$CFLAGS -fopenmp', 'LDFLAGS=$LDFLAGS -fopenmp'};
     end
 elseif strncmpi(mx, 'mexmac', 6)
-    error('BUILD:OpenMPMac', ...
-        'macOS OpenMP builds require an explicit mexopts file and libomp toolchain.');
+    if isempty(openmp_root)
+        error('BUILD:OpenMPMac', ...
+            'macOS OpenMP builds require openmproot to point to a libomp installation.');
+    end
+    include_dir = fullfile(openmp_root, 'include');
+    lib_dir = fullfile(openmp_root, 'lib');
+    if ~exist(include_dir, 'dir') || ~exist(lib_dir, 'dir')
+        error('BUILD:OpenMPMac', ...
+            'openmproot must contain include/ and lib/ directories: %s', openmp_root);
+    end
+    compile_flags = ['-Xpreprocessor -fopenmp -I"' include_dir '"'];
+    link_flags = ['-L"' lib_dir '" -Wl,-rpath,"' lib_dir '" -lomp'];
+    if strcmpi(language, 'cpp')
+        args = {['CXXFLAGS=$CXXFLAGS ' compile_flags], ...
+                ['LDFLAGS=$LDFLAGS ' link_flags]};
+    else
+        args = {['CFLAGS=$CFLAGS ' compile_flags], ...
+                ['LDFLAGS=$LDFLAGS ' link_flags]};
+    end
 else
     error('BUILD:OpenMPPlatform', 'Unsupported MEX platform for OpenMP: %s', mx);
 end

@@ -184,6 +184,18 @@ jobs:
             platform: windows-x86_64
             compiler: mingw
             products: MATLAB_Support_for_MinGW-w64_C/C++/Fortran_Compiler
+          - runner: macos-15-intel
+            release: R2025b
+            platform: macos-x86_64
+            compiler: ''
+            products: ''
+            mac_arch: x86_64
+          - runner: macos-15
+            release: R2026b
+            platform: macos-arm64
+            compiler: ''
+            products: ''
+            mac_arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -193,6 +205,12 @@ jobs:
         with:
           release: ${{ matrix.release }}
           products: ${{ matrix.products }}
+
+      - name: Install macOS OpenMP runtime
+        if: runner.os == 'macOS'
+        run: |
+          brew install libomp
+          echo "OPENMP_ROOT=$(brew --prefix libomp)" >> "$GITHUB_ENV"
 
       - name: Build OpenMP MEX files and run limited-team smoke tests
         uses: matlab-actions/run-command@v3
@@ -204,8 +222,17 @@ jobs:
           command: >-
             addpath(fullfile(pwd,'test'));
             outdir=fullfile(pwd,'dist','matlab-openmp','${{ matrix.platform }}');
-            build('outdir',outdir,'openmp',true,'compiler','${{ matrix.compiler }}');
+            build('outdir',outdir,'openmp',true,'compiler','${{ matrix.compiler }}','openmproot',getenv('OPENMP_ROOT'));
             smoke_mex(outdir)
+
+      - name: Inspect macOS OpenMP Mach-O binaries
+        if: runner.os == 'macOS'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/matlab-openmp/${{ matrix.platform }}"
+          "${{ matrix.mac_arch }}"
+          "dist/matlab-openmp/${{ matrix.platform }}/macos-ABI.txt"
+          true
 
   octave:
     name: Octave ${{ matrix.platform }}
