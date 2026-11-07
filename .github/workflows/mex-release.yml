@@ -546,14 +546,26 @@ jobs:
       actions: write
       contents: write
     steps:
+      - name: Check out validated release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
       - name: Download validated bundles
         uses: actions/download-artifact@v8
         with:
           name: mex-release-bundles
           path: bundles
 
-      - name: Verify release tag still points to validated source
+      - name: Verify release tag provenance
         run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
+            echo "Release source $GITHUB_SHA is not descended from current origin/main." >&2
+            exit 1
+          fi
+
           remote="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
           tag_ref="refs/tags/$GITHUB_REF_NAME"
           tag_refs="$(git ls-remote --tags "$remote" "$tag_ref" "$tag_ref^{}")"
