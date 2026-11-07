@@ -24,16 +24,12 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
   /* Column index vector (size ncols+1) with last entry equal to nnz. */
   const mwSize ncols = mxGetN(prhs[0]);
   const mwIndex *jc = mxGetJc(prhs[0]);
-  if (sizeof(mwIndex) != 8)
-    mexErrMsgTxt("findsp requires a 64-bit mwIndex build.");
   if (nlhs >= 1) {
     const mwSize dims[] = {1, ncols+1};
     plhs[0] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
     uint64_t *p = (uint64_t *) mxGetData(plhs[0]);
-    /* for (mwSize i = 0; i < ncols+1; i++) { */
-    /*   p[i] = *(jc + i); */
-    /* } */
-    memcpy(p, jc, (ncols+1)*sizeof(uint64_t));
+    for (mwSize i = 0; i < ncols+1; i++)
+      p[i] = (uint64_t)jc[i];
   }
 
   /* Row index vector */
@@ -43,11 +39,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     const mwSize dims[] = {1, nnz};
     plhs[1] = mxCreateNumericArray(2, dims, mxUINT64_CLASS, mxREAL);
     uint64_t *p = (uint64_t *) mxGetData(plhs[1]);
-    /* for (mwSize i = 0; i < nnz; i++) { */
-    /*   p[i] = *(ir + i); */
-    /* } */
-    if (nnz != 0)
-      memcpy(p, ir, nnz*sizeof(uint64_t));
+    for (mwIndex i = 0; i < nnz; i++)
+      p[i] = (uint64_t)ir[i];
   }
 
   /* Index vector */
