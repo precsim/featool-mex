@@ -454,6 +454,16 @@ check_scalar(numel(rrows), 3, 'assemble_s prestress residual rows');
 check_scalar(numel(rcoef), 3, 'assemble_s prestress residual values');
 check_scalar(numel(stress), 9, 'assemble_s prestress stress');
 
+check_assemble_s_2d_rejected('NeoHookean_forces', 2);
+check_assemble_s_2d_rejected('NeoHookean_jacobian', 3);
+check_assemble_s_2d_rejected('NeoHookean_jacobianSlow', 3);
+check_assemble_s_2d_rejected('NeoHookean_stress', 2);
+check_assemble_s_2d_rejected('NeoHookean_prestress', 6);
+check_assemble_s_2d_rejected('RaghavanVorp_forces', 2);
+check_assemble_s_2d_rejected('RaghavanVorp_jacobian', 3);
+check_assemble_s_2d_rejected('RaghavanVorp_jacobianSlow', 3);
+check_assemble_s_2d_rejected('RaghavanVorp_stress', 2);
+
 [rows, cols, coef] = assemble_f('Stokes', 1, 1, 1, 1, 1, 1, ...
     1, 1, 1, 1, 1, 1);
 check_equal(rows, [1; 1; 2], 0, 'assemble_f rows');
@@ -488,6 +498,35 @@ for i = 1:length(bad_connectivity)
 end
 
 fprintf(1, 'All MEX smoke tests passed.\n');
+end
+
+
+function check_assemble_s_2d_rejected(model, output_count)
+caught = false;
+material_param = [1 .25];
+if strncmp(model, 'RaghavanVorp_', 13)
+    material_param = [1 .25 1];
+end
+try
+    if output_count == 2
+        [out1, out2] = assemble_s(2, model, material_param, [0; 0], ... %#ok<ASGLU>
+            1, 1, 1, [1 0 0 1], 1, 1, [0 0]);
+    elseif output_count == 3
+        [out1, out2, out3] = assemble_s(2, model, material_param, [0; 0], ... %#ok<ASGLU>
+            1, 1, 1, [1 0 0 1], 1, 1, [0 0]);
+    elseif output_count == 6
+        [out1, out2, out3, out4, out5, out6] = assemble_s(2, model, ... %#ok<ASGLU>
+            material_param, [0; 0], 1, 1, 1, [1 0 0 1], 1, 1, [0 0], zeros(4, 1));
+    else
+        error('SMOKE_MEX:Failure', 'Unsupported assemble_s output count.');
+    end
+catch err
+    caught = ~isempty(strfind(err.message, 'require dimension 3'));
+end
+if ~caught
+    error('SMOKE_MEX:Failure', ...
+        'assemble_s accepted 2D input for 3D-only material model %s.', model);
+end
 end
 
 
