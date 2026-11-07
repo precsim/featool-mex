@@ -144,6 +144,26 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     mexRequireIntAddressableInputs(nrhs, prhs);
     int dim = mexCheckedPositiveIntScalar(prhs[0], "dimension");
+
+    switch (model) {
+    case MODEL_NEOHOOKEAN_FORCES:
+    case MODEL_NEOHOOKEAN_JACOBIAN:
+    case MODEL_NEOHOOKEAN_JACOBIAN_SLOW:
+    case MODEL_NEOHOOKEAN_STRESS:
+    case MODEL_NEOHOOKEAN_PRESTRESS:
+    case MODEL_RAGHAVANVORP_FORCES:
+    case MODEL_RAGHAVANVORP_JACOBIAN:
+    case MODEL_RAGHAVANVORP_JACOBIAN_SLOW:
+    case MODEL_RAGHAVANVORP_STRESS:
+        if (dim != 3) {
+            mxFree(Material_Model);
+            mexErrMsgTxt("Neo-Hookean and Raghavan-Vorp material models require dimension 3.");
+        }
+        break;
+    default:
+        break;
+    }
+
     int nln = mexCheckedPositiveIntScalar(prhs[5], "local node count");
     int noe = mexCheckedSizeToInt(mxGetN(prhs[4]), "element count");
     int NumQuadPoints = mexCheckedSizeToInt(mxGetN(prhs[6]), "quadrature point count");
