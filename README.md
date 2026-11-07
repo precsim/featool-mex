@@ -6,9 +6,9 @@ Prebuilt binaries are produced and tested entirely on standard GitHub-hosted Act
 
 ## Download a release
 
-Use the [latest GitHub Release](https://github.com/precsim/featool-mex/releases/latest), or download the current `v0.1.1` release from:
+Use the [latest GitHub Release](https://github.com/precsim/featool-mex/releases/latest), or download the current `v0.1.2` release from:
 
-https://github.com/precsim/featool-mex/releases/tag/v0.1.1
+https://github.com/precsim/featool-mex/releases/tag/v0.1.2
 
 Choose exactly one ZIP for your runtime and platform:
 
@@ -128,7 +128,7 @@ The exact source commit, compiler information, runtime used for the build, and A
 
 Version tags matching `v*` trigger `.github/workflows/mex-release.yml`. A successful tagged release performs the complete MATLAB and Octave build matrix, same-runtime smoke tests, ABI audits, fresh-runner downloaded-artifact tests, checksum verification, bundle assembly, and GitHub Release publication.
 
-After publication, `.github/workflows/release-consumer.yml` downloads each published ZIP and the release-level `SHA256SUMS` from the GitHub Release onto fresh GitHub-hosted runners, verifies both the release ZIP and extracted bundle checksums, and runs the smoke tests from the exact source commit recorded in each bundle without rebuilding. Automatic runs also require that recorded source commit to match the release workflow commit. The workflow can be dispatched manually for an existing release tag such as `v0.1.1`.
+After publication, `.github/workflows/release-consumer.yml` downloads each published ZIP and the release-level `SHA256SUMS` from the GitHub Release onto fresh GitHub-hosted runners, verifies both the release ZIP and extracted bundle checksums, and runs the smoke tests from the exact source commit recorded in each bundle without rebuilding. Automatic runs also require that recorded source commit to match the release workflow commit. The workflow can be dispatched manually for an existing release tag such as `v0.1.2`.
 
 If GitHub cancels a consumer job before assigning a hosted runner, `.github/workflows/release-consumer-retry.yml` automatically re-runs only the failed jobs, for at most three attempts total. Failures after a runner starts are left unchanged for investigation.
 
