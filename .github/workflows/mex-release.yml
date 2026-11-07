@@ -1,0 +1,576 @@
+name: MEX hosted release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate deterministic target manifest
+        run: python3 ci/check_manifest.py
+      - name: Enforce GitHub-hosted-only release execution
+        run: python3 ci/check_hosted_release.py
+
+  matlab-build:
+    name: MATLAB hosted build ${{ matrix.platform }}
+    needs: preflight
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            release: R2023a
+            platform: linux-x86_64
+            extension: mexa64
+            audit: linux
+            audit_file: linux-ABI.json
+            compiler: ''
+          - runner: windows-2022
+            release: R2023a
+            platform: windows-x86_64
+            extension: mexw64
+            audit: windows
+            audit_file: windows-ABI.txt
+            compiler: mingw
+          - runner: macos-15-intel
+            release: R2024b
+            platform: macos-x86_64
+            extension: mexmaci64
+            audit: macos-x86_64
+            audit_file: macos-ABI.txt
+            compiler: ''
+          - runner: macos-15
+            release: R2024b
+            platform: macos-arm64
+            extension: mexmaca64
+            audit: macos-arm64
+            audit_file: macos-ABI.txt
+            compiler: ''
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+
+      - name: Install supported MinGW 8.1 on Windows
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        env:
+          MINGW_URL: https://download.qt.io/development_releases/prebuilt/mingw_64/x86_64-8.1.0-release-posix-seh-rt_v6-rev0.7z
+          MINGW_SHA256: 853970527b5de4a55ec8ca4d3fd732c00ae1c69974cc930c82604396d43e79f8
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'mingw-8.1.0.7z'
+          $extractRoot = Join-Path $env:RUNNER_TEMP 'mingw-8.1.0'
+          Invoke-WebRequest -Uri $env:MINGW_URL -OutFile $archive
+
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:MINGW_SHA256) {
+            throw "MinGW archive checksum mismatch: $actualHash"
+          }
+
+          $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "7-Zip was not found at $sevenZip"
+          }
+          & $sevenZip x $archive "-o$extractRoot" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed with exit code $LASTEXITCODE"
+          }
+
+          $mingwRoot = Join-Path $extractRoot 'mingw64'
+          $gcc = Join-Path $mingwRoot 'bin\gcc.exe'
+          if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
+            throw "MinGW GCC was not found at $gcc"
+          }
+
+          "MW_MINGW64_LOC=$mingwRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          (Join-Path $mingwRoot 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $gcc --version
+
+      - name: Build serial MEX files and run same-runtime smoke tests
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            outdir=fullfile(pwd,'dist','matlab','${{ matrix.platform }}');
+            build('outdir',outdir,'openmp',false,'compiler','${{ matrix.compiler }}');
+            smoke_mex(outdir)
+
+      - name: Inspect Linux ELF ABI
+        if: matrix.audit == 'linux'
+        run: >-
+          python3 ci/check_linux_abi.py
+          "dist/matlab/${{ matrix.platform }}"
+          --extensions "${{ matrix.extension }}"
+          --output "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Windows PE ABI
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        run: >-
+          ./ci/check_windows_binary.ps1
+          -Directory "dist/matlab/${{ matrix.platform }}"
+          -ReportFile "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Intel macOS Mach-O ABI
+        if: matrix.audit == 'macos-x86_64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/matlab/${{ matrix.platform }}"
+          x86_64
+          "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Apple silicon macOS Mach-O ABI
+        if: matrix.audit == 'macos-arm64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/matlab/${{ matrix.platform }}"
+          arm64
+          "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Finalize hosted MATLAB artifact
+        run: >-
+          python ci/finalize_artifact.py
+          "dist/matlab/${{ matrix.platform }}"
+          --extension "${{ matrix.extension }}"
+          --runtime matlab
+          --platform "${{ matrix.platform }}"
+          --built-with "${{ matrix.release }}"
+          --audit-file "dist/matlab/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          --source-sha "${{ github.sha }}"
+          --compatibility "GitHub-hosted ${{ matrix.release }} build, same-runtime smoke test, and binary audit passed"
+
+      - name: Upload MATLAB release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: matlab-${{ matrix.platform }}-hosted-release
+          path: dist/matlab/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 3
+
+  matlab-artifact-validation:
+    name: MATLAB downloaded-artifact validation ${{ matrix.platform }}
+    needs: matlab-build
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            release: R2026b
+            platform: linux-x86_64
+          - runner: windows-2025
+            release: R2026b
+            platform: windows-x86_64
+          - runner: macos-15-intel
+            release: R2025b
+            platform: macos-x86_64
+          - runner: macos-15
+            release: R2026b
+            platform: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download exact hosted-build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-${{ matrix.platform }}-hosted-release
+          path: dist/matlab/${{ matrix.platform }}
+
+      - name: Verify internal artifact checksums
+        run: >-
+          python ci/verify_checksums.py
+          "dist/matlab/${{ matrix.platform }}"
+
+      - name: Set up validation MATLAB runtime
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ matrix.release }}
+
+      - name: Smoke test downloaded artifact without rebuilding
+        uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath(fullfile(pwd,'test'));
+            smoke_mex(fullfile(pwd,'dist','matlab','${{ matrix.platform }}'))
+
+      - name: Verify artifact remains byte-identical after validation
+        run: >-
+          python ci/verify_checksums.py
+          "dist/matlab/${{ matrix.platform }}"
+
+  octave-build:
+    name: Octave hosted build ${{ matrix.platform }}
+    needs: preflight
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux-x86_64
+            octave_cmd: octave
+            audit: linux
+            audit_file: linux-ABI.json
+          - runner: windows-2022
+            platform: windows-x86_64
+            octave_cmd: octave-cli
+            audit: windows
+            audit_file: windows-ABI.txt
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            octave_cmd: octave
+            audit: macos-x86_64
+            audit_file: macos-ABI.txt
+          - runner: macos-15
+            platform: macos-arm64
+            octave_cmd: octave
+            audit: macos-arm64
+            audit_file: macos-ABI.txt
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Octave on Linux
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends octave octave-dev
+
+      - name: Install Octave on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install octave --yes --no-progress
+          $octaveCli = Get-ChildItem -LiteralPath 'C:\Program Files\GNU Octave' -Filter octave-cli.exe -Recurse |
+            Select-Object -First 1
+          if (-not $octaveCli) {
+            throw 'octave-cli.exe was not found after Chocolatey installation'
+          }
+          $octaveCli.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Octave on macOS
+        if: runner.os == 'macOS'
+        run: brew install octave
+
+      - name: Show Octave version
+        run: ${{ matrix.octave_cmd }} --version
+
+      - name: Build serial Octave MEX files and run same-runtime smoke tests
+        run: >-
+          ${{ matrix.octave_cmd }} --no-gui --quiet --eval
+          "addpath(fullfile(pwd,'test'));
+          outdir=fullfile(pwd,'dist','octave','${{ matrix.platform }}');
+          build_octave('outdir',outdir,'openmp',false);
+          smoke_mex(outdir);"
+
+      - name: Inspect Octave Linux ELF ABI
+        if: matrix.audit == 'linux'
+        run: >-
+          python3 ci/check_linux_abi.py
+          "dist/octave/${{ matrix.platform }}"
+          --extensions mex
+          --output "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Octave Windows PE ABI
+        if: matrix.audit == 'windows'
+        shell: pwsh
+        run: >-
+          ./ci/check_windows_binary.ps1
+          -Directory "dist/octave/${{ matrix.platform }}"
+          -ReportFile "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          -AllowCompilerRuntime
+
+      - name: Inspect Octave Intel macOS Mach-O ABI
+        if: matrix.audit == 'macos-x86_64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/octave/${{ matrix.platform }}"
+          x86_64
+          "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Inspect Octave Apple silicon macOS Mach-O ABI
+        if: matrix.audit == 'macos-arm64'
+        run: >-
+          bash ci/check_macos_binary.sh
+          "dist/octave/${{ matrix.platform }}"
+          arm64
+          "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+
+      - name: Finalize hosted Octave artifact
+        run: >-
+          python ci/finalize_artifact.py
+          "dist/octave/${{ matrix.platform }}"
+          --extension mex
+          --runtime octave
+          --platform "${{ matrix.platform }}"
+          --audit-file "dist/octave/${{ matrix.platform }}/${{ matrix.audit_file }}"
+          --source-sha "${{ github.sha }}"
+          --compatibility "GitHub-hosted Octave build, same-runtime smoke test, and binary audit passed"
+
+      - name: Upload Octave release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: octave-${{ matrix.platform }}-hosted-release
+          path: dist/octave/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 3
+
+  octave-artifact-validation:
+    name: Octave downloaded-artifact validation ${{ matrix.platform }}
+    needs: octave-build
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+            octave_cmd: octave
+          - runner: windows-2025
+            platform: windows-x86_64
+            octave_cmd: octave-cli
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            octave_cmd: octave
+          - runner: macos-15
+            platform: macos-arm64
+            octave_cmd: octave
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download exact hosted-build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: octave-${{ matrix.platform }}-hosted-release
+          path: dist/octave/${{ matrix.platform }}
+
+      - name: Verify internal artifact checksums
+        run: >-
+          python ci/verify_checksums.py
+          "dist/octave/${{ matrix.platform }}"
+
+      - name: Install current Octave on Linux
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends octave
+
+      - name: Install current Octave on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install octave --yes --no-progress
+          $octaveCli = Get-ChildItem -LiteralPath 'C:\Program Files\GNU Octave' -Filter octave-cli.exe -Recurse |
+            Select-Object -First 1
+          if (-not $octaveCli) {
+            throw 'octave-cli.exe was not found after Chocolatey installation'
+          }
+          $octaveCli.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Octave on macOS
+        if: runner.os == 'macOS'
+        run: brew install octave
+
+      - name: Show validation Octave version
+        run: ${{ matrix.octave_cmd }} --version
+
+      - name: Smoke test downloaded Octave artifact without rebuilding
+        run: >-
+          ${{ matrix.octave_cmd }} --no-gui --quiet --eval
+          "addpath(fullfile(pwd,'test'));
+          smoke_mex(fullfile(pwd,'dist','octave','${{ matrix.platform }}'));"
+
+      - name: Verify artifact remains byte-identical after validation
+        run: >-
+          python ci/verify_checksums.py
+          "dist/octave/${{ matrix.platform }}"
+
+  release-bundle:
+    name: Assemble validated release bundles
+    needs:
+      - matlab-artifact-validation
+      - octave-artifact-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download Linux MATLAB artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-linux-x86_64-hosted-release
+          path: release/matlab-linux-x86_64
+      - name: Download Windows MATLAB artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-windows-x86_64-hosted-release
+          path: release/matlab-windows-x86_64
+      - name: Download Intel macOS MATLAB artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-macos-x86_64-hosted-release
+          path: release/matlab-macos-x86_64
+      - name: Download Apple silicon MATLAB artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: matlab-macos-arm64-hosted-release
+          path: release/matlab-macos-arm64
+
+      - name: Download Linux Octave artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: octave-linux-x86_64-hosted-release
+          path: release/octave-linux-x86_64
+      - name: Download Windows Octave artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: octave-windows-x86_64-hosted-release
+          path: release/octave-windows-x86_64
+      - name: Download Intel macOS Octave artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: octave-macos-x86_64-hosted-release
+          path: release/octave-macos-x86_64
+      - name: Download Apple silicon Octave artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: octave-macos-arm64-hosted-release
+          path: release/octave-macos-arm64
+
+      - name: Verify hosted-build artifact checksums
+        run: |
+          for dir in release/matlab-* release/octave-*; do
+            python3 ci/verify_checksums.py "$dir"
+          done
+
+      - name: Record fresh-runner artifact validation
+        env:
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          for dir in release/matlab-* release/octave-*; do
+            {
+              echo "GitHub-hosted downloaded-artifact validation passed."
+              echo "Validation workflow: $RUN_URL"
+              echo "Source SHA: $GITHUB_SHA"
+              echo "The MEX binaries are byte-identical to the artifacts tested on fresh GitHub-hosted runners."
+            } > "$dir/HOSTED-VALIDATION.txt"
+          done
+
+      - name: Refresh artifact checksums after validation record
+        run: |
+          for dir in release/matlab-* release/octave-*; do
+            (
+              cd "$dir"
+              find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' |
+                sort -z |
+                xargs -0 sha256sum > SHA256SUMS
+            )
+            python3 ci/verify_checksums.py "$dir"
+          done
+
+      - name: Create platform bundles
+        run: |
+          mkdir -p bundles
+          for dir in release/matlab-* release/octave-*; do
+            name="$(basename "$dir")"
+            (cd release && zip -qr "../bundles/$name.zip" "$name")
+          done
+          (cd bundles && sha256sum *.zip > SHA256SUMS)
+
+      - name: Upload release bundles
+        uses: actions/upload-artifact@v7
+        with:
+          name: mex-release-bundles
+          path: |
+            bundles/*.zip
+            bundles/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push'
+    needs: release-bundle
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Download validated bundles
+        uses: actions/download-artifact@v8
+        with:
+          name: mex-release-bundles
+          path: bundles
+
+      - name: Verify release tag still points to validated source
+        run: |
+          remote="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          tag_refs="$(git ls-remote --tags "$remote" "$tag_ref" "$tag_ref^{}")"
+          if [[ -z "$tag_refs" ]]; then
+            echo "Release tag $GITHUB_REF_NAME no longer exists." >&2
+            exit 1
+          fi
+
+          direct_sha="$(awk -v ref="$tag_ref" '$2 == ref { print $1 }' <<<"$tag_refs")"
+          peeled_sha="$(awk -v ref="$tag_ref^{}" '$2 == ref { print $1 }' <<<"$tag_refs")"
+          tag_sha="${peeled_sha:-$direct_sha}"
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Release tag $GITHUB_REF_NAME points to $tag_sha, expected $GITHUB_SHA." >&2
+            exit 1
+          fi
+
+      - name: Attach bundles to GitHub Release
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              bundles/*.zip \
+              bundles/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              bundles/*.zip \
+              bundles/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --generate-notes
+          fi
+
+      - name: Delete published Actions artifacts
+        continue-on-error: true
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[].id' |
+          while read -r artifact_id; do
+            [[ -n "$artifact_id" ]] || continue
+            gh api --method DELETE \
+              "/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+          done
