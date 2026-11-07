@@ -139,7 +139,7 @@ jobs:
           name: matlab-${{ matrix.platform }}-source-ci
           path: dist/matlab/${{ matrix.platform }}/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
   matlab-openmp:
     name: MATLAB OpenMP ${{ matrix.platform }}
@@ -298,4 +298,4 @@ jobs:
           name: octave-${{ matrix.platform }}-source-ci
           path: dist/octave/${{ matrix.platform }}/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
